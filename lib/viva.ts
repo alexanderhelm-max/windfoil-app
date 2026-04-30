@@ -40,7 +40,12 @@ export async function fetchVivaStation(id: number): Promise<VivaObservation | nu
 
     const medelvind = samples.find((s) => s.Name === 'Medelvind');
     const byvind = samples.find((s) => s.Name === 'Byvind');
-    const vattentemp = samples.find((s) => s.Name === 'Vattentemp');
+    // Water temp varies by station: "Vattentemp" (surface), "Vattentemp 3m" (near-surface),
+    // "Vattentemp Botten" (bottom — skip, not surface relevant)
+    const vattentemp =
+      samples.find((s) => s.Name === 'Vattentemp') ??
+      samples.find((s) => s.Name === 'Vattentemp 3m') ??
+      samples.find((s) => /^Vattentemp(?!.*Botten)/.test(s.Name));
 
     if (!medelvind && !byvind) return null;
 
