@@ -174,16 +174,17 @@ export default function StationCard({
             </span>
           </div>
 
-          {/* Water temp + Updated */}
-          <div className="flex items-center justify-between mt-2">
-            {current.waterTemp !== undefined ? (
-              <span className="text-slate-400 text-xs">
-                🌊 {current.waterTemp.toFixed(1)}°C
-              </span>
-            ) : (
-              <span />
-            )}
-            <span className="text-slate-500 text-xs">
+          {/* Air + Water temp + Updated */}
+          <div className="flex items-center justify-between mt-2 gap-2">
+            <div className="flex items-center gap-2 text-xs text-slate-400 min-w-0">
+              {current.airTemp !== undefined && (
+                <span title="Air temperature">🌡️ {current.airTemp.toFixed(1)}°C</span>
+              )}
+              {current.waterTemp !== undefined && (
+                <span title="Water temperature">🌊 {current.waterTemp.toFixed(1)}°C</span>
+              )}
+            </div>
+            <span className="text-slate-500 text-xs shrink-0">
               Updated {formatUpdated(current.updatedAt)}
             </span>
           </div>

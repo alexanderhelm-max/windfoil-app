@@ -30,6 +30,9 @@ export function formatStationMessage(
     `Wind: ${current.avgWind.toFixed(1)} m/s avg / ${current.gust.toFixed(1)} gust — ${compass} ${current.heading}°`,
     `Gusts: ${gustText[gustLevel]}`,
   ];
+  if (current.airTemp !== undefined) {
+    lines.push(`Air: ${current.airTemp.toFixed(1)}°C`);
+  }
   if (current.waterTemp !== undefined) {
     lines.push(`Water: ${current.waterTemp.toFixed(1)}°C`);
   }

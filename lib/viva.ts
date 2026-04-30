@@ -23,6 +23,7 @@ export interface VivaObservation {
   heading: number;
   updatedAt: string;
   waterTemp?: number;
+  airTemp?: number;
 }
 
 export async function fetchVivaStation(id: number): Promise<VivaObservation | null> {
@@ -46,6 +47,7 @@ export async function fetchVivaStation(id: number): Promise<VivaObservation | nu
       samples.find((s) => s.Name === 'Vattentemp') ??
       samples.find((s) => s.Name === 'Vattentemp 3m') ??
       samples.find((s) => /^Vattentemp(?!.*Botten)/.test(s.Name));
+    const lufttemp = samples.find((s) => s.Name === 'Lufttemp');
 
     if (!medelvind && !byvind) return null;
 
@@ -57,6 +59,7 @@ export async function fetchVivaStation(id: number): Promise<VivaObservation | nu
       heading: ref.Heading,
       updatedAt: ref.Updated,
       waterTemp: vattentemp ? parseFloat(vattentemp.Value) : undefined,
+      airTemp: lufttemp ? parseFloat(lufttemp.Value) : undefined,
     };
   } catch {
     return null;
