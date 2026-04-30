@@ -1,9 +1,28 @@
 'use client';
 
 import { ForecastPoint } from '@/lib/smhi';
-import { getCondition, conditionColors, conditionLabels, ConditionLevel } from '@/lib/wind-utils';
+import {
+  getCondition,
+  conditionColors,
+  conditionLabels,
+  ConditionLevel,
+  headingToCompass,
+} from '@/lib/wind-utils';
 import { formatRankingMessage, getAppUrl } from '@/lib/share';
 import ShareMenu from './ShareMenu';
+
+// Circular mean of bearings (degrees). Avoids the 350° + 10° = 180° (wrong) trap.
+function avgBearing(dirs: number[]): number {
+  if (dirs.length === 0) return 0;
+  let sumX = 0;
+  let sumY = 0;
+  for (const d of dirs) {
+    sumX += Math.cos((d * Math.PI) / 180);
+    sumY += Math.sin((d * Math.PI) / 180);
+  }
+  const a = (Math.atan2(sumY, sumX) * 180) / Math.PI;
+  return (a + 360) % 360;
+}
 
 interface StationForecast {
   stationId: string;
@@ -21,6 +40,7 @@ interface RankedStation {
   end: Date;
   avgWindSpeed: number;
   peakWindSpeed: number;
+  avgWindDir: number;
   condition: ConditionLevel;
   gustRatio: number;
   durationHours: number;
@@ -83,7 +103,7 @@ function findBestWindowWithin(
       const avgSpeed = b.reduce((s, p) => s + p.windSpeed, 0) / b.length;
       const peakSpeed = Math.max(...b.map((p) => p.windSpeed));
       const avgGust = b.reduce((s, p) => s + p.gust, 0) / b.length;
-      const avgDir = b.reduce((s, p) => s + p.windDir, 0) / b.length;
+      const avgDir = avgBearing(b.map((p) => p.windDir));
       const condition = getCondition(avgSpeed, avgDir);
       const gustRatio = avgSpeed > 0 ? avgGust / avgSpeed : 1;
       const start = new Date(b[0].time);
@@ -94,7 +114,7 @@ function findBestWindowWithin(
         avgSpeed * 30 +
         durationHours * 5 -
         gustRatio * 5;
-      return { avgSpeed, peakSpeed, condition, gustRatio, start, end, durationHours, score };
+      return { avgSpeed, peakSpeed, avgDir, condition, gustRatio, start, end, durationHours, score };
     });
 
   if (scored.length === 0) return null;
@@ -107,6 +127,7 @@ function findBestWindowWithin(
     end: best.end,
     avgWindSpeed: best.avgSpeed,
     peakWindSpeed: best.peakSpeed,
+    avgWindDir: best.avgDir,
     condition: best.condition,
     gustRatio: best.gustRatio,
     durationHours: best.durationHours,
@@ -139,6 +160,7 @@ function RankedList({ title, items }: { title: string; items: RankedStation[] })
       durationHours: it.durationHours,
       avgWindSpeed: it.avgWindSpeed,
       peakWindSpeed: it.peakWindSpeed,
+      avgWindDir: it.avgWindDir,
       condition: it.condition,
     })),
     getAppUrl()
@@ -176,16 +198,26 @@ function RankedList({ title, items }: { title: string; items: RankedStation[] })
                     {conditionLabels[it.condition]}
                   </span>
                 </div>
-                <div className="text-xs text-slate-400">
-                  {formatWindowTime(it.start)} ({it.durationHours.toFixed(0)}h) · ~
-                  <span className="text-slate-200 font-medium">
-                    {it.avgWindSpeed.toFixed(1)}
+                <div className="text-xs text-slate-400 flex items-center gap-1 flex-wrap">
+                  <span>{formatWindowTime(it.start)} ({it.durationHours.toFixed(0)}h)</span>
+                  <span className="text-slate-600">·</span>
+                  <span className="inline-flex items-center gap-0.5">
+                    <svg
+                      className="w-3 h-3 text-slate-300 inline-block"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                      style={{ transform: `rotate(${(it.avgWindDir + 180) % 360}deg)` }}
+                    >
+                      <path d="M12 2L8 20l4-3 4 3z" />
+                    </svg>
+                    <span className="text-slate-300">{headingToCompass(it.avgWindDir)}</span>
+                    <span className="text-slate-500">{Math.round(it.avgWindDir)}°</span>
                   </span>
-                  <span className="text-slate-500"> avg / </span>
-                  <span className="text-slate-200 font-medium">
-                    {it.peakWindSpeed.toFixed(1)}
-                  </span>
-                  <span className="text-slate-500"> peak m/s</span>
+                  <span className="text-slate-600">·</span>
+                  <span className="text-slate-200 font-medium">{it.avgWindSpeed.toFixed(1)}</span>
+                  <span className="text-slate-500">/</span>
+                  <span className="text-slate-200 font-medium">{it.peakWindSpeed.toFixed(1)}</span>
+                  <span className="text-slate-500">m/s</span>
                 </div>
               </div>
             </li>

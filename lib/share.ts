@@ -47,6 +47,7 @@ export interface RankedSpotShare {
   durationHours: number;
   avgWindSpeed: number;
   peakWindSpeed: number;
+  avgWindDir: number;
   condition: ConditionLevel;
 }
 
@@ -70,8 +71,9 @@ export function formatRankingMessage(
   }
   const lines = [`*Best foiling spots — ${windowLabel}*`];
   spots.slice(0, 5).forEach((s, i) => {
+    const dir = `${headingToCompass(s.avgWindDir)} ${Math.round(s.avgWindDir)}°`;
     lines.push(
-      `${i + 1}. ${s.stationName} [${conditionLabels[s.condition]}] — ${shortTime(s.start)} (${s.durationHours.toFixed(0)}h) — ${s.avgWindSpeed.toFixed(1)}/${s.peakWindSpeed.toFixed(1)} m/s avg/peak`
+      `${i + 1}. ${s.stationName} [${conditionLabels[s.condition]}] — ${shortTime(s.start)} (${s.durationHours.toFixed(0)}h) — ${dir} — ${s.avgWindSpeed.toFixed(1)}/${s.peakWindSpeed.toFixed(1)} m/s avg/peak`
     );
   });
   lines.push('');

@@ -163,7 +163,9 @@ export default function StationCard({
                 className="w-4 h-4 text-slate-300"
                 viewBox="0 0 24 24"
                 fill="currentColor"
-                style={{ transform: `rotate(${heading}deg)` }}
+                /* heading = where the wind comes FROM. The arrow points to where it's going,
+                   so we rotate by heading + 180°. */
+                style={{ transform: `rotate(${(heading + 180) % 360}deg)` }}
               >
                 <path d="M12 2L8 20l4-3 4 3z" />
               </svg>
