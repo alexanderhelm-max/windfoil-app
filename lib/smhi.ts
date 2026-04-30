@@ -41,6 +41,7 @@ export interface ForecastPoint {
   windSpeed: number;
   windDir: number;
   gust: number;
+  airTemp?: number;
 }
 
 export async function fetchSmhiForecast(lat: number, lon: number): Promise<ForecastPoint[]> {
@@ -48,7 +49,7 @@ export async function fetchSmhiForecast(lat: number, lon: number): Promise<Forec
     const url =
       `https://api.open-meteo.com/v1/forecast` +
       `?latitude=${lat}&longitude=${lon}` +
-      `&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m` +
+      `&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m,temperature_2m` +
       `&forecast_days=4&wind_speed_unit=ms&timezone=Europe%2FStockholm`;
     const res = await fetch(url, { next: { revalidate: 3600 }, signal: AbortSignal.timeout(8000) });
     if (!res.ok) return [];
@@ -57,6 +58,7 @@ export async function fetchSmhiForecast(lat: number, lon: number): Promise<Forec
     const speeds: number[] = data.hourly?.wind_speed_10m ?? [];
     const dirs: number[] = data.hourly?.wind_direction_10m ?? [];
     const gusts: number[] = data.hourly?.wind_gusts_10m ?? [];
+    const temps: number[] = data.hourly?.temperature_2m ?? [];
     const now = Date.now();
     const cutoff48h = now + 48 * 3600 * 1000;
 
@@ -66,6 +68,7 @@ export async function fetchSmhiForecast(lat: number, lon: number): Promise<Forec
       windSpeed: speeds[i] ?? 0,
       windDir: dirs[i] ?? 0,
       gust: gusts[i] ?? 0,
+      airTemp: temps[i],
     }));
 
     // 0–48h: hourly. 48–96h: every 6 hours (00, 06, 12, 18 UTC).
@@ -76,7 +79,13 @@ export async function fetchSmhiForecast(lat: number, lon: number): Promise<Forec
         const d = new Date(p.epoch);
         return d.getUTCHours() % 6 === 0;
       })
-      .map(({ time, windSpeed, windDir, gust }) => ({ time, windSpeed, windDir, gust }));
+      .map(({ time, windSpeed, windDir, gust, airTemp }) => ({
+        time,
+        windSpeed,
+        windDir,
+        gust,
+        airTemp,
+      }));
   } catch {
     return [];
   }

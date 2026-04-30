@@ -116,6 +116,7 @@ export default function Dashboard() {
         gust: nearest.gust,
         heading: nearest.windDir,
         updatedAt: nearest.time,
+        airTemp: nearest.airTemp,
       };
     }
     return {
