@@ -13,6 +13,8 @@ import {
   ConditionLevel,
   GustLevel,
 } from '@/lib/wind-utils';
+import { formatStationMessage, getAppUrl } from '@/lib/share';
+import ShareMenu from './ShareMenu';
 
 interface StationCardProps {
   id: string;
@@ -85,27 +87,35 @@ export default function StationCard({
       }}
       aria-pressed={isSelected}
     >
-      {onRemove && (
-        <span
-          role="button"
-          aria-label={`Remove ${name}`}
-          tabIndex={0}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (confirm(`Remove "${name}" from your stations?`)) onRemove(id);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
+      <span className="absolute top-1.5 right-1.5 flex items-center gap-1 z-10">
+        {current && (
+          <ShareMenu
+            message={formatStationMessage(name, description, current, getAppUrl())}
+            label={`Share ${name}`}
+          />
+        )}
+        {onRemove && (
+          <span
+            role="button"
+            aria-label={`Remove ${name}`}
+            tabIndex={0}
+            onClick={(e) => {
               e.stopPropagation();
               if (confirm(`Remove "${name}" from your stations?`)) onRemove(id);
-            }
-          }}
-          className="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center rounded-full bg-slate-900/70 text-slate-400 hover:bg-red-900/80 hover:text-white opacity-0 group-hover:opacity-100 sm:opacity-0 max-sm:opacity-100 transition cursor-pointer text-sm leading-none z-10"
-        >
-          ×
-        </span>
-      )}
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                e.stopPropagation();
+                if (confirm(`Remove "${name}" from your stations?`)) onRemove(id);
+              }
+            }}
+            className="w-7 h-7 flex items-center justify-center rounded-full bg-slate-900/60 text-slate-400 hover:bg-red-900/80 hover:text-white transition cursor-pointer text-sm leading-none"
+          >
+            ×
+          </span>
+        )}
+      </span>
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
         <div>

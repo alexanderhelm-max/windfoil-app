@@ -2,6 +2,8 @@
 
 import { ForecastPoint } from '@/lib/smhi';
 import { getCondition, conditionColors, conditionLabels, ConditionLevel } from '@/lib/wind-utils';
+import { formatRankingMessage, getAppUrl } from '@/lib/share';
+import ShareMenu from './ShareMenu';
 
 interface StationForecast {
   stationId: string;
@@ -129,9 +131,24 @@ function rank(stationForecasts: StationForecast[], hours: number): RankedStation
 }
 
 function RankedList({ title, items }: { title: string; items: RankedStation[] }) {
+  const shareMessage = formatRankingMessage(
+    title,
+    items.map((it) => ({
+      stationName: it.stationName,
+      start: it.start,
+      durationHours: it.durationHours,
+      avgWindSpeed: it.avgWindSpeed,
+      peakWindSpeed: it.peakWindSpeed,
+      condition: it.condition,
+    })),
+    getAppUrl()
+  );
   return (
     <div className="flex-1 min-w-0">
-      <h3 className="text-sm font-semibold text-slate-300 mb-2 uppercase tracking-wide">{title}</h3>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">{title}</h3>
+        {items.length > 0 && <ShareMenu message={shareMessage} label={`Share ${title}`} />}
+      </div>
       {items.length === 0 ? (
         <p className="text-slate-500 text-sm py-3">No good windows in this period.</p>
       ) : (
