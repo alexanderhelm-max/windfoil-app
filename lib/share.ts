@@ -7,14 +7,13 @@ import {
   headingToCompass,
 } from './wind-utils';
 
-const conditionEmoji: Record<ConditionLevel, string> = {
-  'too-little': '⚪',
-  'ok': '🟡',
-  'great': '🟢',
-  'crazy': '🟠',
+// Plain text labels — avoiding emojis that older platforms render as � (mojibake).
+// The colored circle emojis (Unicode 12.0, 2019) and 🌬️ (variation selector) are the worst offenders.
+const gustText: Record<'smooth' | 'moderate' | 'gusty', string> = {
+  smooth: 'Smooth',
+  moderate: 'Moderate gusts',
+  gusty: 'Gusty',
 };
-
-const gustEmoji = { smooth: '😎', moderate: '🌬️', gusty: '💨' };
 
 export function formatStationMessage(
   stationName: string,
@@ -26,13 +25,13 @@ export function formatStationMessage(
   const gustLevel = getGustLevel(current.avgWind, current.gust);
   const compass = headingToCompass(current.heading);
   const lines = [
-    `🏄 ${stationName} (${description})`,
-    `${conditionEmoji[condition]} ${conditionLabels[condition]}`,
-    `💨 ${current.avgWind.toFixed(1)} m/s avg · ${current.gust.toFixed(1)} gust · ${compass} ${current.heading}°`,
-    `${gustEmoji[gustLevel]} ${gustLevel === 'smooth' ? 'Smooth' : gustLevel === 'moderate' ? 'Moderate gusts' : 'Gusty'}`,
+    `*${stationName}* (${description})`,
+    `Condition: ${conditionLabels[condition]}`,
+    `Wind: ${current.avgWind.toFixed(1)} m/s avg / ${current.gust.toFixed(1)} gust — ${compass} ${current.heading}°`,
+    `Gusts: ${gustText[gustLevel]}`,
   ];
   if (current.waterTemp !== undefined) {
-    lines.push(`🌊 Water ${current.waterTemp.toFixed(1)}°C`);
+    lines.push(`Water: ${current.waterTemp.toFixed(1)}°C`);
   }
   lines.push('');
   lines.push(appUrl);
@@ -64,12 +63,12 @@ export function formatRankingMessage(
   appUrl: string
 ): string {
   if (spots.length === 0) {
-    return `🏄 ${windowLabel}: no good foiling windows.\n\n${appUrl}`;
+    return `Best foiling spots — ${windowLabel}: no good windows found.\n\n${appUrl}`;
   }
-  const lines = [`🏄 Best foiling spots — ${windowLabel}`];
+  const lines = [`*Best foiling spots — ${windowLabel}*`];
   spots.slice(0, 5).forEach((s, i) => {
     lines.push(
-      `${i + 1}. ${s.stationName} ${conditionEmoji[s.condition]} ${shortTime(s.start)} (${s.durationHours.toFixed(0)}h) — ${s.avgWindSpeed.toFixed(1)}/${s.peakWindSpeed.toFixed(1)} m/s avg/peak`
+      `${i + 1}. ${s.stationName} [${conditionLabels[s.condition]}] — ${shortTime(s.start)} (${s.durationHours.toFixed(0)}h) — ${s.avgWindSpeed.toFixed(1)}/${s.peakWindSpeed.toFixed(1)} m/s avg/peak`
     );
   });
   lines.push('');
