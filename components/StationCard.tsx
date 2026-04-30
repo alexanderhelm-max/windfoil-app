@@ -87,49 +87,49 @@ export default function StationCard({
       }}
       aria-pressed={isSelected}
     >
-      <span className="absolute top-1.5 right-1.5 flex items-center gap-1 z-10">
-        {current && (
-          <ShareMenu
-            message={formatStationMessage(name, description, current, getAppUrl())}
-            label={`Share ${name}`}
-          />
-        )}
-        {onRemove && (
-          <span
-            role="button"
-            aria-label={`Remove ${name}`}
-            tabIndex={0}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (confirm(`Remove "${name}" from your stations?`)) onRemove(id);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
+      {/* Header */}
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <div className="min-w-0">
+          <h3 className="font-bold text-lg leading-tight truncate">{name}</h3>
+          <p className="text-slate-400 text-xs mt-0.5 truncate">{description}</p>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {current && (
+            <span
+              className="text-xs font-semibold px-2 py-1 rounded-full"
+              style={{ backgroundColor: condColor + '33', color: condColor }}
+            >
+              {conditionLabels[condition]}
+            </span>
+          )}
+          {current && (
+            <ShareMenu
+              message={formatStationMessage(name, description, current, getAppUrl())}
+              label={`Share ${name}`}
+            />
+          )}
+          {onRemove && (
+            <span
+              role="button"
+              aria-label={`Remove ${name}`}
+              tabIndex={0}
+              onClick={(e) => {
                 e.stopPropagation();
                 if (confirm(`Remove "${name}" from your stations?`)) onRemove(id);
-              }
-            }}
-            className="w-7 h-7 flex items-center justify-center rounded-full bg-slate-900/60 text-slate-400 hover:bg-red-900/80 hover:text-white transition cursor-pointer text-sm leading-none"
-          >
-            ×
-          </span>
-        )}
-      </span>
-      {/* Header */}
-      <div className="flex items-start justify-between mb-3">
-        <div>
-          <h3 className="font-bold text-lg leading-tight">{name}</h3>
-          <p className="text-slate-400 text-xs mt-0.5">{description}</p>
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (confirm(`Remove "${name}" from your stations?`)) onRemove(id);
+                }
+              }}
+              className="w-7 h-7 flex items-center justify-center rounded-full bg-slate-900/60 text-slate-400 hover:bg-red-900/80 hover:text-white transition cursor-pointer text-sm leading-none"
+            >
+              ×
+            </span>
+          )}
         </div>
-        {current && (
-          <span
-            className="text-xs font-semibold px-2 py-1 rounded-full ml-2 shrink-0"
-            style={{ backgroundColor: condColor + '33', color: condColor }}
-          >
-            {conditionLabels[condition]}
-          </span>
-        )}
       </div>
 
       {current ? (
