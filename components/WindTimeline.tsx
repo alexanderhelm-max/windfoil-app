@@ -102,24 +102,28 @@ export default function WindTimeline({ stationName, history, forecast }: WindTim
 
   const nowEpoch = Date.now();
 
-  const customTooltip = ({
-    active,
-    payload,
-    label,
-  }: {
+  interface TooltipPayloadEntry {
+    name?: string;
+    value?: number;
+    color?: string;
+  }
+  interface TooltipPropsLoose {
     active?: boolean;
-    payload?: { name: string; value: number; color: string }[];
-    label?: number;
-  }) => {
+    payload?: TooltipPayloadEntry[];
+    label?: string | number;
+  }
+  const customTooltip = (props: TooltipPropsLoose) => {
+    const { active, payload, label } = props;
     if (!active || !payload || payload.length === 0) return null;
+    const labelNum = typeof label === 'number' ? label : Number(label);
     return (
       <div className="bg-slate-800 border border-slate-600 rounded-lg p-3 text-sm shadow-xl">
         <p className="text-slate-300 mb-2 font-medium">
-          {label !== undefined ? formatTooltipTime(label) : ''}
+          {!isNaN(labelNum) ? formatTooltipTime(labelNum) : ''}
         </p>
-        {payload.map((entry) => (
-          <div key={entry.name} className="flex items-center gap-2">
-            <span style={{ color: entry.color }}>{entry.name}:</span>
+        {payload.map((entry, i) => (
+          <div key={entry.name ?? i} className="flex items-center gap-2">
+            <span style={{ color: entry.color ?? '#94a3b8' }}>{entry.name ?? ''}:</span>
             <span className="font-semibold text-white">{entry.value?.toFixed(1)} m/s</span>
           </div>
         ))}
