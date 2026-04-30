@@ -13,11 +13,12 @@ interface GoWindowProps {
   stationForecasts: StationForecast[];
 }
 
-interface GoWindowResult {
+interface RankedStation {
   stationName: string;
   start: Date;
   end: Date;
   avgWindSpeed: number;
+  peakWindSpeed: number;
   condition: ConditionLevel;
   gustRatio: number;
   durationHours: number;
@@ -28,198 +29,173 @@ function formatWindowTime(d: Date): string {
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const tomorrowStart = new Date(todayStart.getTime() + 86400000);
   const dayAfterStart = new Date(todayStart.getTime() + 2 * 86400000);
-
   const hhmm = d.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
-
   if (d >= todayStart && d < tomorrowStart) return `Today ${hhmm}`;
   if (d >= tomorrowStart && d < dayAfterStart) return `Tomorrow ${hhmm}`;
   return d.toLocaleDateString('sv-SE', { weekday: 'short' }) + ` ${hhmm}`;
 }
 
-function findBestWindow(_stationId: string, stationName: string, forecast: ForecastPoint[]): GoWindowResult | null {
+const conditionRank: Record<ConditionLevel, number> = {
+  'too-little': 0,
+  'ok': 1,
+  'great': 2,
+  'crazy': 2,
+};
+
+function findBestWindowWithin(
+  stationName: string,
+  forecast: ForecastPoint[],
+  hours: number
+): RankedStation | null {
   if (forecast.length === 0) return null;
+  const now = Date.now();
+  const cutoff = now + hours * 3600 * 1000;
 
-  // Find contiguous blocks >= 2h where condition is ok or better
-  const blocks: { start: number; end: number; points: ForecastPoint[] }[] = [];
-  let currentBlock: ForecastPoint[] | null = null;
+  // Trim forecast to the period
+  const trimmed = forecast.filter((p) => {
+    const t = new Date(p.time).getTime();
+    return t >= now && t <= cutoff;
+  });
+  if (trimmed.length === 0) return null;
 
-  for (const point of forecast) {
-    const condition = getCondition(point.windSpeed, point.windDir);
-    const isGood = condition === 'ok' || condition === 'great' || condition === 'crazy';
-
-    if (isGood) {
-      if (!currentBlock) currentBlock = [];
-      currentBlock.push(point);
+  // Find contiguous blocks where condition is OK or better
+  const blocks: ForecastPoint[][] = [];
+  let current: ForecastPoint[] = [];
+  for (const p of trimmed) {
+    const c = getCondition(p.windSpeed, p.windDir);
+    if (c !== 'too-little') {
+      current.push(p);
     } else {
-      if (currentBlock && currentBlock.length > 0) {
-        const startTime = new Date(currentBlock[0].time).getTime();
-        const endTime = new Date(currentBlock[currentBlock.length - 1].time).getTime();
-        const durationHours = (endTime - startTime) / 3600000;
-        if (durationHours >= 2) {
-          blocks.push({ start: startTime, end: endTime, points: currentBlock });
-        }
-        currentBlock = null;
-      }
+      if (current.length > 0) blocks.push(current);
+      current = [];
     }
   }
-  // flush last block
-  if (currentBlock && currentBlock.length > 0) {
-    const startTime = new Date(currentBlock[0].time).getTime();
-    const endTime = new Date(currentBlock[currentBlock.length - 1].time).getTime();
-    const durationHours = (endTime - startTime) / 3600000;
-    if (durationHours >= 2) {
-      blocks.push({ start: startTime, end: endTime, points: currentBlock });
-    }
-  }
+  if (current.length > 0) blocks.push(current);
 
   if (blocks.length === 0) return null;
 
-  // Score and rank blocks: prefer great > ok, then longer duration, then lower gust ratio
-  const conditionRank: Record<ConditionLevel, number> = {
-    'too-little': 0,
-    'ok': 1,
-    'great': 2,
-    'crazy': 2,
-  };
+  // Score each block; pick the best
+  const scored = blocks
+    .filter((b) => b.length >= 2) // at least 2 hourly points = 1h window
+    .map((b) => {
+      const avgSpeed = b.reduce((s, p) => s + p.windSpeed, 0) / b.length;
+      const peakSpeed = Math.max(...b.map((p) => p.windSpeed));
+      const avgGust = b.reduce((s, p) => s + p.gust, 0) / b.length;
+      const avgDir = b.reduce((s, p) => s + p.windDir, 0) / b.length;
+      const condition = getCondition(avgSpeed, avgDir);
+      const gustRatio = avgSpeed > 0 ? avgGust / avgSpeed : 1;
+      const start = new Date(b[0].time);
+      const end = new Date(b[b.length - 1].time);
+      const durationHours = (end.getTime() - start.getTime()) / 3600000;
+      const score =
+        conditionRank[condition] * 1000 +
+        avgSpeed * 30 +
+        durationHours * 5 -
+        gustRatio * 5;
+      return { avgSpeed, peakSpeed, condition, gustRatio, start, end, durationHours, score };
+    });
 
-  const scored = blocks.map((block) => {
-    const avgSpeed = block.points.reduce((s, p) => s + p.windSpeed, 0) / block.points.length;
-    const avgGust = block.points.reduce((s, p) => s + p.gust, 0) / block.points.length;
-    const avgDir = block.points.reduce((s, p) => s + p.windDir, 0) / block.points.length;
-    const condition = getCondition(avgSpeed, avgDir);
-    const gustRatio = avgSpeed > 0 ? avgGust / avgSpeed : 1;
-    const durationHours = (block.end - block.start) / 3600000;
-
-    const score =
-      conditionRank[condition] * 1000 +
-      durationHours * 10 -
-      gustRatio * 5;
-
-    return { block, avgSpeed, condition, gustRatio, durationHours, score };
-  });
-
+  if (scored.length === 0) return null;
   scored.sort((a, b) => b.score - a.score);
   const best = scored[0];
 
   return {
     stationName,
-    start: new Date(best.block.start),
-    end: new Date(best.block.end),
+    start: best.start,
+    end: best.end,
     avgWindSpeed: best.avgSpeed,
+    peakWindSpeed: best.peakSpeed,
     condition: best.condition,
     gustRatio: best.gustRatio,
     durationHours: best.durationHours,
   };
 }
 
-export default function GoWindow({ stationForecasts }: GoWindowProps) {
-  const windows: GoWindowResult[] = [];
-
-  for (const sf of stationForecasts) {
-    const w = findBestWindow(sf.stationId, sf.stationName, sf.forecast);
-    if (w) windows.push(w);
-  }
-
-  // Sort all windows: best condition first, then longest duration
-  windows.sort((a, b) => {
-    const conditionRank: Record<ConditionLevel, number> = {
-      'too-little': 0,
-      'ok': 1,
-      'great': 2,
-      'crazy': 2,
-    };
-    const rankDiff = conditionRank[b.condition] - conditionRank[a.condition];
-    if (rankDiff !== 0) return rankDiff;
-    return b.durationHours - a.durationHours;
+function rank(stationForecasts: StationForecast[], hours: number): RankedStation[] {
+  const ranked = stationForecasts
+    .map((sf) => findBestWindowWithin(sf.stationName, sf.forecast, hours))
+    .filter((r): r is RankedStation => r !== null);
+  // Sort by condition rank, then avg wind speed, then duration, then less gustiness
+  ranked.sort((a, b) => {
+    const cd = conditionRank[b.condition] - conditionRank[a.condition];
+    if (cd !== 0) return cd;
+    const sd = b.avgWindSpeed - a.avgWindSpeed;
+    if (Math.abs(sd) > 0.1) return sd;
+    const dd = b.durationHours - a.durationHours;
+    if (Math.abs(dd) > 0.1) return dd;
+    return a.gustRatio - b.gustRatio;
   });
+  return ranked;
+}
 
-  const bestWindow = windows[0] ?? null;
+function RankedList({ title, items }: { title: string; items: RankedStation[] }) {
+  return (
+    <div className="flex-1 min-w-0">
+      <h3 className="text-sm font-semibold text-slate-300 mb-2 uppercase tracking-wide">{title}</h3>
+      {items.length === 0 ? (
+        <p className="text-slate-500 text-sm py-3">No good windows in this period.</p>
+      ) : (
+        <ol className="space-y-1.5">
+          {items.map((it, idx) => (
+            <li
+              key={`${title}-${it.stationName}-${idx}`}
+              className="flex items-center gap-2 rounded-lg px-3 py-2"
+              style={{
+                backgroundColor: conditionColors[it.condition] + '15',
+                borderLeft: `3px solid ${conditionColors[it.condition]}`,
+              }}
+            >
+              <span className="text-slate-500 font-mono text-xs w-5 shrink-0">#{idx + 1}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  <span className="font-semibold text-white truncate">{it.stationName}</span>
+                  <span
+                    className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                    style={{
+                      backgroundColor: conditionColors[it.condition] + '40',
+                      color: conditionColors[it.condition],
+                    }}
+                  >
+                    {conditionLabels[it.condition]}
+                  </span>
+                </div>
+                <div className="text-xs text-slate-400">
+                  {formatWindowTime(it.start)} ({it.durationHours.toFixed(0)}h) · ~
+                  <span className="text-slate-200 font-medium">
+                    {it.avgWindSpeed.toFixed(1)}
+                  </span>
+                  <span className="text-slate-500"> avg / </span>
+                  <span className="text-slate-200 font-medium">
+                    {it.peakWindSpeed.toFixed(1)}
+                  </span>
+                  <span className="text-slate-500"> peak m/s</span>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+export default function GoWindow({ stationForecasts }: GoWindowProps) {
+  const next24h = rank(stationForecasts, 24);
+  const next48h = rank(stationForecasts, 48);
 
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 mb-6">
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-4">
         <span className="text-2xl">🏄</span>
-        <h2 className="text-lg font-bold text-slate-100">Best Go Window (next 48h)</h2>
+        <h2 className="text-lg font-bold text-slate-100">Spot ranking</h2>
+        <span className="text-slate-500 text-xs ml-auto">Best window per station, ranked</span>
       </div>
 
-      {bestWindow ? (
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-          <div
-            className="flex-1 rounded-lg p-4"
-            style={{
-              backgroundColor: conditionColors[bestWindow.condition] + '22',
-              borderLeft: `4px solid ${conditionColors[bestWindow.condition]}`,
-            }}
-          >
-            <div className="flex items-center justify-between mb-1">
-              <span className="font-bold text-xl text-white">{bestWindow.stationName}</span>
-              <span
-                className="text-sm font-semibold px-2 py-0.5 rounded-full"
-                style={{
-                  backgroundColor: conditionColors[bestWindow.condition] + '44',
-                  color: conditionColors[bestWindow.condition],
-                }}
-              >
-                {conditionLabels[bestWindow.condition]}
-              </span>
-            </div>
-
-            <div className="text-slate-300 text-sm mb-1">
-              <span className="font-medium">{formatWindowTime(bestWindow.start)}</span>
-              {' '}–{' '}
-              <span className="font-medium">{formatWindowTime(bestWindow.end)}</span>
-              <span className="text-slate-500 ml-2">
-                ({bestWindow.durationHours.toFixed(0)}h)
-              </span>
-            </div>
-
-            <div className="flex items-center gap-3 text-sm">
-              <span className="text-slate-300">
-                ~{bestWindow.avgWindSpeed.toFixed(1)} m/s avg
-              </span>
-              <span className="text-slate-500">|</span>
-              <span
-                className={
-                  bestWindow.gustRatio < 1.3
-                    ? 'text-green-400'
-                    : bestWindow.gustRatio < 1.5
-                    ? 'text-yellow-400'
-                    : 'text-orange-400'
-                }
-              >
-                {bestWindow.gustRatio < 1.3
-                  ? 'Smooth'
-                  : bestWindow.gustRatio < 1.5
-                  ? 'Moderate gusts'
-                  : 'Gusty'}{' '}
-                ({bestWindow.gustRatio.toFixed(2)}×)
-              </span>
-            </div>
-          </div>
-
-          {/* Other windows */}
-          {windows.length > 1 && (
-            <div className="flex-shrink-0">
-              <p className="text-slate-500 text-xs mb-2">Other windows:</p>
-              <div className="flex flex-col gap-1">
-                {windows.slice(1, 4).map((w, i) => (
-                  <div key={i} className="text-sm text-slate-400">
-                    <span
-                      className="inline-block w-2 h-2 rounded-full mr-1 align-middle"
-                      style={{ backgroundColor: conditionColors[w.condition] }}
-                    />
-                    {w.stationName}: {formatWindowTime(w.start)} ({w.durationHours.toFixed(0)}h)
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="text-slate-400 py-2">
-          No ideal window in next 48h. Check back later or consider lower-wind activity.
-        </div>
-      )}
+      <div className="flex flex-col sm:flex-row gap-6">
+        <RankedList title="Next 24h" items={next24h} />
+        <div className="hidden sm:block w-px bg-slate-700/60" />
+        <RankedList title="Next 48h" items={next48h} />
+      </div>
     </div>
   );
 }
