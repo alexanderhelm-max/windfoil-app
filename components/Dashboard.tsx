@@ -109,6 +109,7 @@ export default function Dashboard() {
     const recentObs =
       d?.history?.windSpeed.slice(-3).map((p) => ({ time: p.time, wind: p.value })) ?? [];
     let current = d?.current ?? null;
+    let airTempIsForecast = false;
     if (!current && d?.forecast && d.forecast.length > 0) {
       const nearest = d.forecast[0];
       current = {
@@ -118,6 +119,11 @@ export default function Dashboard() {
         updatedAt: nearest.time,
         airTemp: nearest.airTemp,
       };
+      airTempIsForecast = nearest.airTemp !== undefined;
+    } else if (current && current.airTemp === undefined && d?.forecast && d.forecast.length > 0) {
+      // Live wind data but station has no air-temp sensor — fall back to forecast value
+      current = { ...current, airTemp: d.forecast[0].airTemp };
+      airTempIsForecast = d.forecast[0].airTemp !== undefined;
     }
     return {
       station: s,
@@ -125,6 +131,7 @@ export default function Dashboard() {
       history: d?.history ?? null,
       forecast: d?.forecast ?? [],
       recentObs,
+      airTempIsForecast,
     };
   });
 
@@ -215,6 +222,7 @@ export default function Dashboard() {
               isSelected={selectedStationId === e.station.id}
               onClick={() => handleSelectStation(e.station.id)}
               onRemove={handleRemove}
+              airTempIsForecast={e.airTempIsForecast}
             />
           ))}
         </div>

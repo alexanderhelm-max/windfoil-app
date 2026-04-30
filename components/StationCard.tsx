@@ -26,6 +26,8 @@ interface StationCardProps {
   isSelected: boolean;
   onClick: () => void;
   onRemove?: (id: string) => void;
+  /** True when the air temp came from forecast rather than a real sensor */
+  airTempIsForecast?: boolean;
 }
 
 const gustColors: Record<GustLevel, string> = {
@@ -59,6 +61,7 @@ export default function StationCard({
   isSelected,
   onClick,
   onRemove,
+  airTempIsForecast = false,
 }: StationCardProps) {
   const avgWind = current?.avgWind ?? 0;
   const gust = current?.gust ?? 0;
@@ -178,7 +181,10 @@ export default function StationCard({
           <div className="flex items-center justify-between mt-2 gap-2">
             <div className="flex items-center gap-2 text-xs text-slate-400 min-w-0">
               {current.airTemp !== undefined && (
-                <span title="Air temperature">🌡️ {current.airTemp.toFixed(1)}°C</span>
+                <span title={airTempIsForecast ? 'Air temperature (forecast)' : 'Air temperature (measured)'}>
+                  🌡️ {airTempIsForecast ? '~' : ''}
+                  {current.airTemp.toFixed(1)}°C
+                </span>
               )}
               {current.waterTemp !== undefined && (
                 <span title="Water temperature">🌊 {current.waterTemp.toFixed(1)}°C</span>
