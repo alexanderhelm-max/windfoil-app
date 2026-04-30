@@ -2,8 +2,9 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Wind Foil Conditions',
-  description: 'Wind foiling conditions for the Swedish west coast',
+  title: 'Swedish Wind Foil Opportunities',
+  description: 'Live wind & forecast for windfoiling on the Swedish west coast',
+  viewport: 'width=device-width, initial-scale=1, viewport-fit=cover',
 };
 
 export default function RootLayout({
