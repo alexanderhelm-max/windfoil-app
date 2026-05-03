@@ -44,6 +44,46 @@ export interface ForecastPoint {
   airTemp?: number;
 }
 
+export interface DaylightInfo {
+  sunrise: string; // ISO local time, e.g. "2026-05-03T05:14"
+  sunset: string;
+  /** Minutes of daylight remaining from now. 0 if past sunset; full duration if before sunrise. */
+  remainingMinutes: number;
+  /** True if it's currently between sunrise and sunset. */
+  isDay: boolean;
+}
+
+export async function fetchDaylight(lat: number, lon: number): Promise<DaylightInfo | null> {
+  try {
+    const url =
+      `https://api.open-meteo.com/v1/forecast` +
+      `?latitude=${lat}&longitude=${lon}` +
+      `&daily=sunrise,sunset&timezone=Europe%2FStockholm&forecast_days=1`;
+    const res = await fetch(url, {
+      next: { revalidate: 3600 },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const sunrise: string | undefined = data.daily?.sunrise?.[0];
+    const sunset: string | undefined = data.daily?.sunset?.[0];
+    if (!sunrise || !sunset) return null;
+    const now = new Date();
+    const sunriseDate = new Date(sunrise);
+    const sunsetDate = new Date(sunset);
+    const isDay = now >= sunriseDate && now < sunsetDate;
+    let remainingMinutes = 0;
+    if (now < sunriseDate) {
+      remainingMinutes = Math.round((sunsetDate.getTime() - sunriseDate.getTime()) / 60000);
+    } else if (isDay) {
+      remainingMinutes = Math.round((sunsetDate.getTime() - now.getTime()) / 60000);
+    }
+    return { sunrise, sunset, remainingMinutes, isDay };
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchSmhiForecast(lat: number, lon: number): Promise<ForecastPoint[]> {
   try {
     const url =

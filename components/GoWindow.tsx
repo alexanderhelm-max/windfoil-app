@@ -7,6 +7,7 @@ import {
   conditionLabels,
   ConditionLevel,
   headingToCompass,
+  bearingDiff,
 } from '@/lib/wind-utils';
 import { formatRankingMessage, getAppUrl } from '@/lib/share';
 import ShareMenu from './ShareMenu';
@@ -41,6 +42,8 @@ interface RankedStation {
   avgWindSpeed: number;
   peakWindSpeed: number;
   avgWindDir: number;
+  startWindDir: number;
+  endWindDir: number;
   condition: ConditionLevel;
   gustRatio: number;
   durationHours: number;
@@ -64,19 +67,21 @@ const conditionRank: Record<ConditionLevel, number> = {
   'crazy': 2,
 };
 
-function findBestWindowWithin(
+function findBestWindowInRange(
   stationName: string,
   forecast: ForecastPoint[],
-  hours: number
+  startHours: number,
+  endHours: number
 ): RankedStation | null {
   if (forecast.length === 0) return null;
   const now = Date.now();
-  const cutoff = now + hours * 3600 * 1000;
+  const start = now + startHours * 3600 * 1000;
+  const end = now + endHours * 3600 * 1000;
 
   // Trim forecast to the period
   const trimmed = forecast.filter((p) => {
     const t = new Date(p.time).getTime();
-    return t >= now && t <= cutoff;
+    return t >= start && t <= end;
   });
   if (trimmed.length === 0) return null;
 
@@ -104,17 +109,31 @@ function findBestWindowWithin(
       const peakSpeed = Math.max(...b.map((p) => p.windSpeed));
       const avgGust = b.reduce((s, p) => s + p.gust, 0) / b.length;
       const avgDir = avgBearing(b.map((p) => p.windDir));
+      const startDir = b[0].windDir;
+      const endDir = b[b.length - 1].windDir;
       const condition = getCondition(avgSpeed, avgDir);
       const gustRatio = avgSpeed > 0 ? avgGust / avgSpeed : 1;
-      const start = new Date(b[0].time);
-      const end = new Date(b[b.length - 1].time);
-      const durationHours = (end.getTime() - start.getTime()) / 3600000;
+      const startTime = new Date(b[0].time);
+      const endTime = new Date(b[b.length - 1].time);
+      const durationHours = (endTime.getTime() - startTime.getTime()) / 3600000;
       const score =
         conditionRank[condition] * 1000 +
         avgSpeed * 30 +
         durationHours * 5 -
         gustRatio * 5;
-      return { avgSpeed, peakSpeed, avgDir, condition, gustRatio, start, end, durationHours, score };
+      return {
+        avgSpeed,
+        peakSpeed,
+        avgDir,
+        startDir,
+        endDir,
+        condition,
+        gustRatio,
+        start: startTime,
+        end: endTime,
+        durationHours,
+        score,
+      };
     });
 
   if (scored.length === 0) return null;
@@ -128,15 +147,17 @@ function findBestWindowWithin(
     avgWindSpeed: best.avgSpeed,
     peakWindSpeed: best.peakSpeed,
     avgWindDir: best.avgDir,
+    startWindDir: best.startDir,
+    endWindDir: best.endDir,
     condition: best.condition,
     gustRatio: best.gustRatio,
     durationHours: best.durationHours,
   };
 }
 
-function rank(stationForecasts: StationForecast[], hours: number): RankedStation[] {
+function rank(stationForecasts: StationForecast[], startHours: number, endHours: number): RankedStation[] {
   const ranked = stationForecasts
-    .map((sf) => findBestWindowWithin(sf.stationName, sf.forecast, hours))
+    .map((sf) => findBestWindowInRange(sf.stationName, sf.forecast, startHours, endHours))
     .filter((r): r is RankedStation => r !== null);
   // Sort by condition rank, then avg wind speed, then duration, then less gustiness
   ranked.sort((a, b) => {
@@ -199,7 +220,9 @@ function RankedList({ title, items }: { title: string; items: RankedStation[] })
                   </span>
                 </div>
                 <div className="text-xs text-slate-400 flex items-center gap-1 flex-wrap">
-                  <span>{formatWindowTime(it.start)} ({it.durationHours.toFixed(0)}h)</span>
+                  <span>
+                    {formatWindowTime(it.start)} ({it.durationHours.toFixed(0)}h)
+                  </span>
                   <span className="text-slate-600">·</span>
                   <span className="inline-flex items-center gap-0.5">
                     <svg
@@ -212,6 +235,14 @@ function RankedList({ title, items }: { title: string; items: RankedStation[] })
                     </svg>
                     <span className="text-slate-300">{headingToCompass(it.avgWindDir)}</span>
                     <span className="text-slate-500">{Math.round(it.avgWindDir)}°</span>
+                    {bearingDiff(it.startWindDir, it.endWindDir) > 45 && (
+                      <span
+                        className="ml-1 text-amber-400"
+                        title={`Wind shifts from ${headingToCompass(it.startWindDir)} to ${headingToCompass(it.endWindDir)} during this window`}
+                      >
+                        ↻ {headingToCompass(it.startWindDir)}→{headingToCompass(it.endWindDir)}
+                      </span>
+                    )}
                   </span>
                   <span className="text-slate-600">·</span>
                   <span className="text-slate-200 font-medium">{it.avgWindSpeed.toFixed(1)}</span>
@@ -229,15 +260,18 @@ function RankedList({ title, items }: { title: string; items: RankedStation[] })
 }
 
 export default function GoWindow({ stationForecasts }: GoWindowProps) {
-  const next24h = rank(stationForecasts, 24);
-  const next48h = rank(stationForecasts, 48);
+  const next24h = rank(stationForecasts, 0, 24);
+  const next48h = rank(stationForecasts, 0, 48);
+  const day3to4 = rank(stationForecasts, 48, 96);
 
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 mb-6">
       <div className="flex items-center gap-2 mb-4">
         <span className="text-2xl">🏄</span>
         <h2 className="text-lg font-bold text-slate-100">Spot ranking</h2>
-        <span className="text-slate-500 text-xs ml-auto">Best window per station, ranked</span>
+        <span className="text-slate-500 text-xs ml-auto hidden sm:block">
+          Best window per station, ranked
+        </span>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-6">
@@ -245,6 +279,12 @@ export default function GoWindow({ stationForecasts }: GoWindowProps) {
         <div className="hidden sm:block w-px bg-slate-700/60" />
         <RankedList title="Next 48h" items={next48h} />
       </div>
+
+      {day3to4.length > 0 && (
+        <div className="mt-5 pt-4 border-t border-slate-700/50">
+          <RankedList title="Day 3–4 (worth waiting?)" items={day3to4.slice(0, 3)} />
+        </div>
+      )}
     </div>
   );
 }

@@ -1,15 +1,17 @@
 'use client';
 
 import { VivaObservation } from '@/lib/viva';
-import { SmhiObsHistory } from '@/lib/smhi';
+import { SmhiObsHistory, DaylightInfo } from '@/lib/smhi';
 import {
   getCondition,
   getGustLevel,
-  getTrend,
+  getTrendDetail,
   headingToCompass,
   conditionColors,
   conditionLabels,
   trendIcons,
+  getWetsuitHint,
+  getWingHint,
   ConditionLevel,
   GustLevel,
 } from '@/lib/wind-utils';
@@ -28,6 +30,18 @@ interface StationCardProps {
   onRemove?: (id: string) => void;
   /** True when the air temp came from forecast rather than a real sensor */
   airTempIsForecast?: boolean;
+  daylight?: DaylightInfo | null;
+}
+
+function formatDaylightRemaining(d: DaylightInfo): string {
+  if (!d.isDay) {
+    if (d.remainingMinutes > 0) return 'before sunrise';
+    return 'after sunset';
+  }
+  const h = Math.floor(d.remainingMinutes / 60);
+  const m = d.remainingMinutes % 60;
+  if (h === 0) return `${m}m daylight`;
+  return `${h}h ${m}m daylight`;
 }
 
 const gustColors: Record<GustLevel, string> = {
@@ -62,6 +76,7 @@ export default function StationCard({
   onClick,
   onRemove,
   airTempIsForecast = false,
+  daylight,
 }: StationCardProps) {
   const avgWind = current?.avgWind ?? 0;
   const gust = current?.gust ?? 0;
@@ -69,9 +84,13 @@ export default function StationCard({
 
   const condition: ConditionLevel = getCondition(avgWind, heading);
   const gustLevel: GustLevel = getGustLevel(avgWind, gust);
-  const trend = getTrend(recentObs);
+  const trendDetail = getTrendDetail(recentObs);
+  const trend = trendDetail.direction;
+  const trendRate = trendDetail.ratePerHour;
   const compassDir = headingToCompass(heading);
   const condColor = conditionColors[condition];
+  const wetsuit = getWetsuitHint(current?.waterTemp);
+  const wing = getWingHint(avgWind);
 
   const borderStyle = isSelected
     ? `border-2 border-[${condColor}] ring-2 ring-[${condColor}]/40`
@@ -151,8 +170,23 @@ export default function StationCard({
               {gust.toFixed(1)}
             </span>
             <span className="text-slate-400 text-sm">gust</span>
-            <span className="text-xl ml-1" title={`Trend: ${trend}`}>
+            <span
+              className={`ml-1 text-sm font-semibold ${
+                trend === 'building'
+                  ? 'text-green-400'
+                  : trend === 'dropping'
+                  ? 'text-orange-400'
+                  : 'text-slate-400'
+              }`}
+              title={`Trend: ${trend} (${trendRate.toFixed(1)} m/s per hour)`}
+            >
               {trendIcons[trend]}
+              {trend !== 'steady' && (
+                <span className="ml-0.5 tabular-nums">
+                  {trendRate > 0 ? '+' : ''}
+                  {trendRate.toFixed(1)}/h
+                </span>
+              )}
             </span>
           </div>
 
@@ -179,9 +213,25 @@ export default function StationCard({
             </span>
           </div>
 
-          {/* Air + Water temp + Updated — wraps on narrow widths so labels never overlap */}
+          {/* Gear hint — only shown when conditions are foilable */}
+          {(wing || wetsuit) && (
+            <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-2 text-xs text-slate-300">
+              {wing && (
+                <span title="Suggested wing/sail size">
+                  <span className="text-slate-500">Wing:</span> {wing}
+                </span>
+              )}
+              {wetsuit && (
+                <span title="Suggested wetsuit">
+                  <span className="text-slate-500">Suit:</span> {wetsuit}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Air + Water temp + Daylight + Updated — wraps on narrow widths */}
           <div className="flex flex-wrap items-center justify-between mt-2 gap-x-3 gap-y-1">
-            <div className="flex items-center gap-2 text-xs text-slate-400 whitespace-nowrap">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-400">
               {current.airTemp !== undefined && (
                 <span title={airTempIsForecast ? 'Air temperature (forecast)' : 'Air temperature (measured)'}>
                   🌡️ {airTempIsForecast ? '~' : ''}
@@ -190,6 +240,14 @@ export default function StationCard({
               )}
               {current.waterTemp !== undefined && (
                 <span title="Water temperature">🌊 {current.waterTemp.toFixed(1)}°C</span>
+              )}
+              {daylight && (
+                <span
+                  title={`Sunset ${daylight.sunset.slice(11, 16)}`}
+                  className={daylight.isDay ? '' : 'text-slate-500'}
+                >
+                  {daylight.isDay ? '🌅' : '🌙'} {formatDaylightRemaining(daylight)}
+                </span>
               )}
             </div>
             <span className="text-slate-500 text-xs whitespace-nowrap">

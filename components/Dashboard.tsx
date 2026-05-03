@@ -7,7 +7,7 @@ import GoWindow from './GoWindow';
 import AlertBanner from './AlertBanner';
 import AddStationDialog from './AddStationDialog';
 import { VivaObservation } from '@/lib/viva';
-import { SmhiObsHistory, ForecastPoint } from '@/lib/smhi';
+import { SmhiObsHistory, ForecastPoint, DaylightInfo } from '@/lib/smhi';
 import { getCondition } from '@/lib/wind-utils';
 import { Station, DEFAULT_STATIONS } from '@/lib/stations';
 import { loadStations, saveStations, resetStations } from '@/lib/station-store';
@@ -16,6 +16,7 @@ interface FetchedData {
   current: VivaObservation | null;
   history: SmhiObsHistory | null;
   forecast: ForecastPoint[];
+  daylight: DaylightInfo | null;
 }
 
 function buildUrl(s: Station): string {
@@ -51,11 +52,11 @@ export default function Dashboard() {
         stations.map(async (s) => {
           try {
             const res = await fetch(buildUrl(s));
-            if (!res.ok) return [s.id, { current: null, history: null, forecast: [] }] as const;
+            if (!res.ok) return [s.id, { current: null, history: null, forecast: [], daylight: null }] as const;
             const d = (await res.json()) as FetchedData;
             return [s.id, d] as const;
           } catch {
-            return [s.id, { current: null, history: null, forecast: [] }] as const;
+            return [s.id, { current: null, history: null, forecast: [], daylight: null }] as const;
           }
         })
       );
@@ -130,6 +131,7 @@ export default function Dashboard() {
       current,
       history: d?.history ?? null,
       forecast: d?.forecast ?? [],
+      daylight: d?.daylight ?? null,
       recentObs,
       airTempIsForecast,
     };
@@ -223,6 +225,7 @@ export default function Dashboard() {
               onClick={() => handleSelectStation(e.station.id)}
               onRemove={handleRemove}
               airTempIsForecast={e.airTempIsForecast}
+              daylight={e.daylight}
             />
           ))}
         </div>
