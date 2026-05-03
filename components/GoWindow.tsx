@@ -12,6 +12,8 @@ import {
 } from '@/lib/wind-utils';
 import { formatRankingMessage, getAppUrl } from '@/lib/share';
 import ShareMenu from './ShareMenu';
+import { pickRandomQuote } from '@/lib/quotes';
+import { useMemo } from 'react';
 
 // Circular mean of bearings (degrees). Avoids the 350° + 10° = 180° (wrong) trap.
 function avgBearing(dirs: number[]): number {
@@ -212,7 +214,15 @@ function rankNow(stationForecasts: StationForecast[]): RankedStation[] {
   return ranked;
 }
 
-function RankedList({ title, items }: { title: string; items: RankedStation[] }) {
+function RankedList({
+  title,
+  items,
+  emptyContent,
+}: {
+  title: string;
+  items: RankedStation[];
+  emptyContent?: React.ReactNode;
+}) {
   const shareMessage = formatRankingMessage(
     title,
     items.map((it) => ({
@@ -233,7 +243,9 @@ function RankedList({ title, items }: { title: string; items: RankedStation[] })
         {items.length > 0 && <ShareMenu message={shareMessage} label={`Share ${title}`} />}
       </div>
       {items.length === 0 ? (
-        <p className="text-slate-500 text-sm py-3">No good windows in this period.</p>
+        emptyContent ?? (
+          <p className="text-slate-500 text-sm py-3">No good windows in this period.</p>
+        )
       ) : (
         <ol className="space-y-1.5">
           {items.map((it, idx) => (
@@ -310,6 +322,16 @@ export default function GoWindow({ stationForecasts }: GoWindowProps) {
   const next48h = rank(stationForecasts, 0, 48);
   const day3to4 = rank(stationForecasts, 48, 96);
 
+  // Pick once per mount so the quote doesn't re-roll on every render
+  const calmQuote = useMemo(() => pickRandomQuote(), []);
+  const calmEmpty = (
+    <div className="rounded-lg border border-slate-700/60 bg-slate-900/40 p-4 text-center">
+      <p className="text-3xl mb-2">🌊</p>
+      <p className="text-slate-300 text-sm italic leading-relaxed">{calmQuote}</p>
+      <p className="text-slate-600 text-xs mt-2">No surfable wind right now — breathe.</p>
+    </div>
+  );
+
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 mb-6">
       <div className="flex items-center gap-2 mb-4">
@@ -324,7 +346,7 @@ export default function GoWindow({ stationForecasts }: GoWindowProps) {
       <div className="mb-1">
         <p className="text-xs text-slate-500 uppercase tracking-wider mb-2">Go now?</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
-          <RankedList title="Right now" items={now} />
+          <RankedList title="Right now" items={now} emptyContent={calmEmpty} />
           <RankedList title="Next 6h" items={next6h} />
         </div>
       </div>
