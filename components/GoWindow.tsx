@@ -1,6 +1,7 @@
 'use client';
 
 import { ForecastPoint } from '@/lib/smhi';
+import { VivaObservation } from '@/lib/viva';
 import {
   getCondition,
   conditionColors,
@@ -28,6 +29,7 @@ function avgBearing(dirs: number[]): number {
 interface StationForecast {
   stationId: string;
   stationName: string;
+  current: VivaObservation | null;
   forecast: ForecastPoint[];
 }
 
@@ -172,6 +174,44 @@ function rank(stationForecasts: StationForecast[], startHours: number, endHours:
   return ranked;
 }
 
+/**
+ * Rank stations by their CURRENT measured (or nowcast) conditions.
+ * durationHours is set to 0 to signal "right now" in the UI.
+ */
+function rankNow(stationForecasts: StationForecast[]): RankedStation[] {
+  const now = new Date();
+  const ranked: RankedStation[] = stationForecasts
+    .filter((sf) => sf.current !== null)
+    .map((sf) => {
+      const c = sf.current!;
+      const condition = getCondition(c.avgWind, c.heading);
+      const gustRatio = c.avgWind > 0 ? c.gust / c.avgWind : 1;
+      return {
+        stationName: sf.stationName,
+        start: now,
+        end: now,
+        avgWindSpeed: c.avgWind,
+        peakWindSpeed: c.gust,
+        avgWindDir: c.heading,
+        startWindDir: c.heading,
+        endWindDir: c.heading,
+        condition,
+        gustRatio,
+        durationHours: 0,
+      };
+    })
+    .filter((s) => s.condition !== 'too-little');
+
+  ranked.sort((a, b) => {
+    const cd = conditionRank[b.condition] - conditionRank[a.condition];
+    if (cd !== 0) return cd;
+    const sd = b.avgWindSpeed - a.avgWindSpeed;
+    if (Math.abs(sd) > 0.1) return sd;
+    return a.gustRatio - b.gustRatio;
+  });
+  return ranked;
+}
+
 function RankedList({ title, items }: { title: string; items: RankedStation[] }) {
   const shareMessage = formatRankingMessage(
     title,
@@ -221,7 +261,9 @@ function RankedList({ title, items }: { title: string; items: RankedStation[] })
                 </div>
                 <div className="text-xs text-slate-400 flex items-center gap-1 flex-wrap">
                   <span>
-                    {formatWindowTime(it.start)} ({it.durationHours.toFixed(0)}h)
+                    {it.durationHours === 0
+                      ? 'Right now'
+                      : `${formatWindowTime(it.start)} (${it.durationHours.toFixed(0)}h)`}
                   </span>
                   <span className="text-slate-600">·</span>
                   <span className="inline-flex items-center gap-0.5">
@@ -248,7 +290,9 @@ function RankedList({ title, items }: { title: string; items: RankedStation[] })
                   <span className="text-slate-200 font-medium">{it.avgWindSpeed.toFixed(1)}</span>
                   <span className="text-slate-500">/</span>
                   <span className="text-slate-200 font-medium">{it.peakWindSpeed.toFixed(1)}</span>
-                  <span className="text-slate-500">m/s</span>
+                  <span className="text-slate-500">
+                    m/s {it.durationHours === 0 ? 'avg/gust' : 'avg/peak'}
+                  </span>
                 </div>
               </div>
             </li>
@@ -260,6 +304,8 @@ function RankedList({ title, items }: { title: string; items: RankedStation[] })
 }
 
 export default function GoWindow({ stationForecasts }: GoWindowProps) {
+  const now = rankNow(stationForecasts);
+  const next6h = rank(stationForecasts, 0, 6);
   const next24h = rank(stationForecasts, 0, 24);
   const next48h = rank(stationForecasts, 0, 48);
   const day3to4 = rank(stationForecasts, 48, 96);
@@ -270,19 +316,33 @@ export default function GoWindow({ stationForecasts }: GoWindowProps) {
         <span className="text-2xl">🏄</span>
         <h2 className="text-lg font-bold text-slate-100">Spot ranking</h2>
         <span className="text-slate-500 text-xs ml-auto hidden sm:block">
-          Best window per station, ranked
+          Best spots per time horizon
         </span>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-6">
-        <RankedList title="Next 24h" items={next24h} />
-        <div className="hidden sm:block w-px bg-slate-700/60" />
-        <RankedList title="Next 48h" items={next48h} />
+      {/* Row 1 — Go now? Decide in the next few hours */}
+      <div className="mb-1">
+        <p className="text-xs text-slate-500 uppercase tracking-wider mb-2">Go now?</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
+          <RankedList title="Right now" items={now} />
+          <RankedList title="Next 6h" items={next6h} />
+        </div>
       </div>
 
+      {/* Row 2 — Plan for today / tomorrow */}
+      <div className="mt-5 pt-4 border-t border-slate-700/50">
+        <p className="text-xs text-slate-500 uppercase tracking-wider mb-2">Plan ahead</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
+          <RankedList title="Next 24h" items={next24h} />
+          <RankedList title="Next 48h" items={next48h} />
+        </div>
+      </div>
+
+      {/* Row 3 — Worth waiting? Beyond 48h */}
       {day3to4.length > 0 && (
         <div className="mt-5 pt-4 border-t border-slate-700/50">
-          <RankedList title="Day 3–4 (worth waiting?)" items={day3to4.slice(0, 3)} />
+          <p className="text-xs text-slate-500 uppercase tracking-wider mb-2">Worth waiting?</p>
+          <RankedList title="Day 3–4" items={day3to4.slice(0, 3)} />
         </div>
       )}
     </div>

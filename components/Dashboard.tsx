@@ -154,6 +154,7 @@ export default function Dashboard() {
   const stationForecasts = effectiveStations.map((e) => ({
     stationId: e.station.id,
     stationName: e.station.name,
+    current: e.current,
     forecast: e.forecast,
   }));
 
