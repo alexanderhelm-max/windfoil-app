@@ -24,6 +24,9 @@ export interface VivaObservation {
   updatedAt: string;
   waterTemp?: number;
   airTemp?: number;
+  /** False when this VIVA station does not have a wind sensor (e.g. Varberg).
+   *  Wind fields are zero in that case and Dashboard fills them from forecast. */
+  hasWind: boolean;
 }
 
 export async function fetchVivaStation(id: number): Promise<VivaObservation | null> {
@@ -49,9 +52,12 @@ export async function fetchVivaStation(id: number): Promise<VivaObservation | nu
       samples.find((s) => /^Vattentemp(?!.*Botten)/.test(s.Name));
     const lufttemp = samples.find((s) => s.Name === 'Lufttemp');
 
-    if (!medelvind && !byvind) return null;
+    const hasWind = !!(medelvind || byvind);
+    const ref = medelvind ?? byvind ?? vattentemp ?? lufttemp ?? samples[0];
 
-    const ref = medelvind ?? byvind!;
+    // Return data as long as ANY useful sample exists (some stations measure only water level/temp).
+    // Wind-less stations get hasWind=false; Dashboard fills wind from forecast.
+    if (!hasWind && !vattentemp && !lufttemp) return null;
 
     return {
       avgWind: medelvind ? parseVivaValue(medelvind.Value) : 0,
@@ -60,6 +66,7 @@ export async function fetchVivaStation(id: number): Promise<VivaObservation | nu
       updatedAt: ref.Updated,
       waterTemp: vattentemp ? parseFloat(vattentemp.Value) : undefined,
       airTemp: lufttemp ? parseFloat(lufttemp.Value) : undefined,
+      hasWind,
     };
   } catch {
     return null;

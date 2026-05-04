@@ -180,13 +180,20 @@ export default function WindTimeline({ stationName, history, forecast }: WindTim
             wrapperStyle={{ color: '#94a3b8', fontSize: '12px', paddingTop: '8px' }}
           />
 
-          {/* Now reference line */}
+          {/* Now reference line — make it loud so users always see where "now" is */}
           <ReferenceLine
             x={nowEpoch}
-            stroke="#f1f5f9"
-            strokeDasharray="4 4"
-            strokeWidth={1.5}
-            label={{ value: 'Now', position: 'top', fill: '#f1f5f9', fontSize: 11 }}
+            stroke="#facc15"
+            strokeDasharray="6 3"
+            strokeWidth={2}
+            ifOverflow="extendDomain"
+            label={{
+              value: '◀ NOW',
+              position: 'insideTopRight',
+              fill: '#facc15',
+              fontSize: 11,
+              fontWeight: 600,
+            }}
           />
 
           {/* Observed avg */}

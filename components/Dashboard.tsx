@@ -119,12 +119,23 @@ export default function Dashboard() {
         heading: nearest.windDir,
         updatedAt: nearest.time,
         airTemp: nearest.airTemp,
+        hasWind: true,
       };
       airTempIsForecast = nearest.airTemp !== undefined;
-    } else if (current && current.airTemp === undefined && d?.forecast && d.forecast.length > 0) {
-      // Live wind data but station has no air-temp sensor — fall back to forecast value
-      current = { ...current, airTemp: d.forecast[0].airTemp };
-      airTempIsForecast = d.forecast[0].airTemp !== undefined;
+    } else if (current && d?.forecast && d.forecast.length > 0) {
+      // VIVA station with partial data — fill missing wind from forecast, missing air temp too
+      const nearest = d.forecast[0];
+      const next: VivaObservation = { ...current };
+      if (!current.hasWind) {
+        next.avgWind = nearest.windSpeed;
+        next.gust = nearest.gust;
+        next.heading = nearest.windDir;
+      }
+      if (current.airTemp === undefined) {
+        next.airTemp = nearest.airTemp;
+        airTempIsForecast = nearest.airTemp !== undefined;
+      }
+      current = next;
     }
     return {
       station: s,
