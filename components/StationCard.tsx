@@ -30,6 +30,8 @@ interface StationCardProps {
   onRemove?: (id: string) => void;
   /** True when the air temp came from forecast rather than a real sensor */
   airTempIsForecast?: boolean;
+  /** True when the wind values came from forecast (e.g. station with no wind sensor) */
+  windIsForecast?: boolean;
   daylight?: DaylightInfo | null;
 }
 
@@ -76,6 +78,7 @@ export default function StationCard({
   onClick,
   onRemove,
   airTempIsForecast = false,
+  windIsForecast = false,
   daylight,
 }: StationCardProps) {
   const avgWind = current?.avgWind ?? 0;
@@ -157,16 +160,21 @@ export default function StationCard({
       {current ? (
         <>
           {/* Wind speed */}
-          <div className="flex items-baseline gap-1 mb-2">
+          <div
+            className="flex items-baseline gap-1 mb-2"
+            title={windIsForecast ? 'Wind values are forecast (this station has no wind sensor)' : undefined}
+          >
             <span
               className="text-3xl font-bold tabular-nums"
               style={{ color: condColor }}
             >
+              {windIsForecast ? '~' : ''}
               {avgWind.toFixed(1)}
             </span>
             <span className="text-slate-400 text-sm">m/s avg</span>
             <span className="text-slate-500 mx-1">|</span>
             <span className="text-xl font-semibold text-slate-300 tabular-nums">
+              {windIsForecast ? '~' : ''}
               {gust.toFixed(1)}
             </span>
             <span className="text-slate-400 text-sm">gust</span>

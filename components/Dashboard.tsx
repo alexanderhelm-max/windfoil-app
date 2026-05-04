@@ -111,6 +111,7 @@ export default function Dashboard() {
       d?.history?.windSpeed.slice(-3).map((p) => ({ time: p.time, wind: p.value })) ?? [];
     let current = d?.current ?? null;
     let airTempIsForecast = false;
+    let windIsForecast = false;
     if (!current && d?.forecast && d.forecast.length > 0) {
       const nearest = d.forecast[0];
       current = {
@@ -122,6 +123,7 @@ export default function Dashboard() {
         hasWind: true,
       };
       airTempIsForecast = nearest.airTemp !== undefined;
+      windIsForecast = true;
     } else if (current && d?.forecast && d.forecast.length > 0) {
       // VIVA station with partial data — fill missing wind from forecast, missing air temp too
       const nearest = d.forecast[0];
@@ -130,6 +132,8 @@ export default function Dashboard() {
         next.avgWind = nearest.windSpeed;
         next.gust = nearest.gust;
         next.heading = nearest.windDir;
+        next.updatedAt = nearest.time; // honest freshness: wind is from current forecast
+        windIsForecast = true;
       }
       if (current.airTemp === undefined) {
         next.airTemp = nearest.airTemp;
@@ -145,6 +149,7 @@ export default function Dashboard() {
       daylight: d?.daylight ?? null,
       recentObs,
       airTempIsForecast,
+      windIsForecast,
     };
   });
 
@@ -237,6 +242,7 @@ export default function Dashboard() {
               onClick={() => handleSelectStation(e.station.id)}
               onRemove={handleRemove}
               airTempIsForecast={e.airTempIsForecast}
+              windIsForecast={e.windIsForecast}
               daylight={e.daylight}
             />
           ))}
