@@ -18,6 +18,8 @@ interface WindTimelineProps {
   stationName: string;
   history: SmhiObsHistory | null;
   forecast: ForecastPoint[];
+  /** True when history came from Open-Meteo model rather than measured SMHI obs */
+  historyIsModelled?: boolean;
 }
 
 interface ChartDataPoint {
@@ -52,7 +54,12 @@ function formatTooltipTime(epochMs: number): string {
   });
 }
 
-export default function WindTimeline({ stationName, history, forecast }: WindTimelineProps) {
+export default function WindTimeline({
+  stationName,
+  history,
+  forecast,
+  historyIsModelled = false,
+}: WindTimelineProps) {
   // Build merged dataset
   const dataMap = new Map<number, ChartDataPoint>();
 
@@ -141,8 +148,16 @@ export default function WindTimeline({ stationName, history, forecast }: WindTim
 
   return (
     <div className="bg-slate-800 rounded-xl p-4">
-      <h3 className="text-lg font-semibold mb-4 text-slate-200">
+      <h3 className="text-lg font-semibold mb-4 text-slate-200 flex items-center gap-2 flex-wrap">
         {stationName} — Wind Timeline
+        {historyIsModelled && (
+          <span
+            className="text-xs font-normal px-2 py-0.5 rounded-full bg-slate-700 text-slate-400"
+            title="Past wind shown is from Open-Meteo model — no measured station nearby."
+          >
+            past = model
+          </span>
+        )}
       </h3>
       <ResponsiveContainer width="100%" height={300}>
         <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
@@ -199,7 +214,7 @@ export default function WindTimeline({ stationName, history, forecast }: WindTim
           {/* Observed avg */}
           <Line
             dataKey="obsAvg"
-            name="Obs avg"
+            name={historyIsModelled ? 'Past avg (model)' : 'Obs avg'}
             stroke="#3b82f6"
             strokeWidth={2}
             dot={false}
@@ -209,7 +224,7 @@ export default function WindTimeline({ stationName, history, forecast }: WindTim
           {/* Observed gust */}
           <Line
             dataKey="obsGust"
-            name="Obs gust"
+            name={historyIsModelled ? 'Past gust (model)' : 'Obs gust'}
             stroke="#93c5fd"
             strokeWidth={1.5}
             strokeDasharray="4 2"

@@ -84,6 +84,59 @@ export async function fetchDaylight(lat: number, lon: number): Promise<DaylightI
   }
 }
 
+/**
+ * Fetch the last `pastHours` of hourly wind data from Open-Meteo, formatted as SmhiObsHistory
+ * so it can be plugged into the chart wherever a SMHI obs station isn't paired.
+ * This is "model history" not real measurements — adequate for trend visualization.
+ */
+export async function fetchOpenMeteoHistory(
+  lat: number,
+  lon: number,
+  pastHours = 24
+): Promise<SmhiObsHistory | null> {
+  try {
+    const url =
+      `https://api.open-meteo.com/v1/forecast` +
+      `?latitude=${lat}&longitude=${lon}` +
+      `&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m` +
+      `&past_days=2&forecast_days=1&wind_speed_unit=ms&timezone=Europe%2FStockholm`;
+    const res = await fetch(url, {
+      next: { revalidate: 1800 },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const times: string[] = data.hourly?.time ?? [];
+    const speeds: number[] = data.hourly?.wind_speed_10m ?? [];
+    const dirs: number[] = data.hourly?.wind_direction_10m ?? [];
+    const gusts: number[] = data.hourly?.wind_gusts_10m ?? [];
+    const now = Date.now();
+    const cutoff = now - pastHours * 3600 * 1000;
+    const points = times
+      .map((t, i) => ({
+        time: new Date(t).getTime(),
+        speed: speeds[i],
+        dir: dirs[i],
+        gust: gusts[i],
+      }))
+      .filter((p) => p.time >= cutoff && p.time <= now);
+    if (points.length === 0) return null;
+    return {
+      windSpeed: points
+        .filter((p) => typeof p.speed === 'number')
+        .map((p) => ({ time: p.time, value: p.speed })),
+      windDir: points
+        .filter((p) => typeof p.dir === 'number')
+        .map((p) => ({ time: p.time, value: p.dir })),
+      gust: points
+        .filter((p) => typeof p.gust === 'number')
+        .map((p) => ({ time: p.time, value: p.gust })),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchSmhiForecast(lat: number, lon: number): Promise<ForecastPoint[]> {
   try {
     const url =

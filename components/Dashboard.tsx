@@ -17,6 +17,8 @@ interface FetchedData {
   history: SmhiObsHistory | null;
   forecast: ForecastPoint[];
   daylight: DaylightInfo | null;
+  /** True when history came from Open-Meteo model rather than SMHI measured obs */
+  historyIsModelled?: boolean;
 }
 
 function buildUrl(s: Station): string {
@@ -52,11 +54,17 @@ export default function Dashboard() {
         stations.map(async (s) => {
           try {
             const res = await fetch(buildUrl(s));
-            if (!res.ok) return [s.id, { current: null, history: null, forecast: [], daylight: null }] as const;
+            if (!res.ok) return [
+              s.id,
+              { current: null, history: null, forecast: [], daylight: null, historyIsModelled: false },
+            ] as const;
             const d = (await res.json()) as FetchedData;
             return [s.id, d] as const;
           } catch {
-            return [s.id, { current: null, history: null, forecast: [], daylight: null }] as const;
+            return [
+              s.id,
+              { current: null, history: null, forecast: [], daylight: null, historyIsModelled: false },
+            ] as const;
           }
         })
       );
@@ -145,6 +153,7 @@ export default function Dashboard() {
       station: s,
       current,
       history: d?.history ?? null,
+      historyIsModelled: d?.historyIsModelled ?? false,
       forecast: d?.forecast ?? [],
       daylight: d?.daylight ?? null,
       recentObs,
@@ -261,6 +270,7 @@ export default function Dashboard() {
             stationName={selectedEntry.station.name}
             history={selectedEntry.history}
             forecast={selectedEntry.forecast}
+            historyIsModelled={selectedEntry.historyIsModelled}
           />
         )}
       </section>
