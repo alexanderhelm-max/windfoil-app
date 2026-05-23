@@ -37,9 +37,11 @@ interface StationForecast {
 
 interface GoWindowProps {
   stationForecasts: StationForecast[];
+  onStationSelect?: (stationId: string) => void;
 }
 
 interface RankedStation {
+  stationId: string;
   stationName: string;
   start: Date;
   end: Date;
@@ -72,6 +74,7 @@ const conditionRank: Record<ConditionLevel, number> = {
 };
 
 function findBestWindowInRange(
+  stationId: string,
   stationName: string,
   forecast: ForecastPoint[],
   startHours: number,
@@ -145,6 +148,7 @@ function findBestWindowInRange(
   const best = scored[0];
 
   return {
+    stationId,
     stationName,
     start: best.start,
     end: best.end,
@@ -161,7 +165,7 @@ function findBestWindowInRange(
 
 function rank(stationForecasts: StationForecast[], startHours: number, endHours: number): RankedStation[] {
   const ranked = stationForecasts
-    .map((sf) => findBestWindowInRange(sf.stationName, sf.forecast, startHours, endHours))
+    .map((sf) => findBestWindowInRange(sf.stationId, sf.stationName, sf.forecast, startHours, endHours))
     .filter((r): r is RankedStation => r !== null);
   // Sort by condition rank, then avg wind speed, then duration, then less gustiness
   ranked.sort((a, b) => {
@@ -189,6 +193,7 @@ function rankNow(stationForecasts: StationForecast[]): RankedStation[] {
       const condition = getCondition(c.avgWind, c.heading);
       const gustRatio = c.avgWind > 0 ? c.gust / c.avgWind : 1;
       return {
+        stationId: sf.stationId,
         stationName: sf.stationName,
         start: now,
         end: now,
@@ -218,10 +223,12 @@ function RankedList({
   title,
   items,
   emptyContent,
+  onItemClick,
 }: {
   title: string;
   items: RankedStation[];
   emptyContent?: React.ReactNode;
+  onItemClick?: (stationId: string) => void;
 }) {
   const shareMessage = formatRankingMessage(
     title,
@@ -248,14 +255,35 @@ function RankedList({
         )
       ) : (
         <ol className="space-y-1.5">
-          {items.map((it, idx) => (
+          {items.map((it, idx) => {
+            const clickable = !!onItemClick;
+            const handleClick = () => onItemClick?.(it.stationId);
+            return (
             <li
               key={`${title}-${it.stationName}-${idx}`}
-              className="flex items-center gap-2 rounded-lg px-3 py-2"
+              role={clickable ? 'button' : undefined}
+              tabIndex={clickable ? 0 : undefined}
+              onClick={clickable ? handleClick : undefined}
+              onKeyDown={
+                clickable
+                  ? (e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleClick();
+                      }
+                    }
+                  : undefined
+              }
+              className={`flex items-center gap-2 rounded-lg px-3 py-2 ${
+                clickable
+                  ? 'cursor-pointer hover:brightness-125 hover:translate-x-0.5 transition focus:outline-none focus:ring-2 focus:ring-white/30'
+                  : ''
+              }`}
               style={{
                 backgroundColor: conditionColors[it.condition] + '15',
                 borderLeft: `3px solid ${conditionColors[it.condition]}`,
               }}
+              title={clickable ? `Open ${it.stationName} timeline` : undefined}
             >
               <span className="text-slate-500 font-mono text-xs w-5 shrink-0">#{idx + 1}</span>
               <div className="flex-1 min-w-0">
@@ -308,14 +336,15 @@ function RankedList({
                 </div>
               </div>
             </li>
-          ))}
+            );
+          })}
         </ol>
       )}
     </div>
   );
 }
 
-export default function GoWindow({ stationForecasts }: GoWindowProps) {
+export default function GoWindow({ stationForecasts, onStationSelect }: GoWindowProps) {
   const now = rankNow(stationForecasts);
   const next6h = rank(stationForecasts, 0, 6);
   const next24h = rank(stationForecasts, 0, 24);
@@ -346,8 +375,13 @@ export default function GoWindow({ stationForecasts }: GoWindowProps) {
       <div className="mb-1">
         <p className="text-xs text-slate-500 uppercase tracking-wider mb-2">Go now?</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
-          <RankedList title="Right now" items={now} emptyContent={calmEmpty} />
-          <RankedList title="Next 6h" items={next6h} />
+          <RankedList
+            title="Right now"
+            items={now}
+            emptyContent={calmEmpty}
+            onItemClick={onStationSelect}
+          />
+          <RankedList title="Next 6h" items={next6h} onItemClick={onStationSelect} />
         </div>
       </div>
 

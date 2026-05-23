@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, Fragment } from 'react';
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import StationCard from './StationCard';
 import WindTimeline from './WindTimeline';
 import GoWindow from './GoWindow';
@@ -21,6 +21,14 @@ interface FetchedData {
   historyIsModelled?: boolean;
 }
 
+function formatRefreshTime(epochMs: number): string {
+  return new Date(epochMs).toLocaleTimeString('sv-SE', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
 function buildUrl(s: Station): string {
   const params = new URLSearchParams();
   if (s.vivaId != null) params.set('vivaId', String(s.vivaId));
@@ -37,6 +45,9 @@ export default function Dashboard() {
   const [dataLoaded, setDataLoaded] = useState(false);
   const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null);
+  const stationRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const timelineRef = useRef<HTMLDivElement | null>(null);
 
   // Hydrate from localStorage
   useEffect(() => {
@@ -76,6 +87,7 @@ export default function Dashboard() {
       if (cancelled) return;
       setData(Object.fromEntries(entries));
       setDataLoaded(true);
+      setLastRefreshAt(Date.now());
     };
 
     fetchAll(true);
@@ -130,6 +142,27 @@ export default function Dashboard() {
     }
     setSelectedStationId(stationId);
   };
+
+  // When a station is selected (from card click or from GoWindow), scroll the
+  // timeline into view. Defensive: if a layout issue ever pushes it off-screen,
+  // the user still sees it appear.
+  useEffect(() => {
+    if (!selectedStationId) return;
+    // Wait for the timeline DOM to render before scrolling
+    const id = window.setTimeout(() => {
+      timelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+    return () => window.clearTimeout(id);
+  }, [selectedStationId]);
+
+  const handleSelectFromRanking = useCallback((stationId: string) => {
+    setSelectedStationId(stationId);
+    // Scroll the station's card into view first, then the timeline (which is
+    // immediately beneath it) will follow naturally via the effect above.
+    window.setTimeout(() => {
+      stationRefs.current[stationId]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
+  }, []);
 
   // Build effectiveStations: synthesize current from forecast for stations with no live data
   const effectiveStations = stations.map((s) => {
@@ -215,7 +248,14 @@ export default function Dashboard() {
     <div className="max-w-6xl mx-auto px-4 py-6">
       {/* Toolbar */}
       <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
-        <h2 className="text-xl font-bold text-slate-200">Stations</h2>
+        <div className="flex items-baseline gap-3 flex-wrap">
+          <h2 className="text-xl font-bold text-slate-200">Stations</h2>
+          {lastRefreshAt && (
+            <span className="text-xs text-slate-500 tabular-nums" title="Time of last data refresh">
+              Last refresh {formatRefreshTime(lastRefreshAt)}
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-3">
           {!isDefault && (
             <button
@@ -236,7 +276,9 @@ export default function Dashboard() {
 
       <AlertBanner greatStations={greatStations} />
 
-      {dataLoaded && <GoWindow stationForecasts={stationForecasts} />}
+      {dataLoaded && (
+        <GoWindow stationForecasts={stationForecasts} onStationSelect={handleSelectFromRanking} />
+      )}
       {!dataLoaded && (
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 mb-6 text-slate-400 text-sm">
           Loading station data...
@@ -257,22 +299,29 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-8">
           {effectiveStations.map((e) => (
             <Fragment key={e.station.id}>
-              <StationCard
-                id={e.station.id}
-                name={e.station.name}
-                description={e.station.description}
-                current={e.current}
-                history={e.history}
-                recentObs={e.recentObs}
-                isSelected={selectedStationId === e.station.id}
-                onClick={() => handleSelectStation(e.station.id)}
-                onRemove={handleRemove}
-                airTempIsForecast={e.airTempIsForecast}
-                windIsForecast={e.windIsForecast}
-                daylight={e.daylight}
-              />
+              <div
+                ref={(el) => {
+                  stationRefs.current[e.station.id] = el;
+                }}
+                className="scroll-mt-20"
+              >
+                <StationCard
+                  id={e.station.id}
+                  name={e.station.name}
+                  description={e.station.description}
+                  current={e.current}
+                  history={e.history}
+                  recentObs={e.recentObs}
+                  isSelected={selectedStationId === e.station.id}
+                  onClick={() => handleSelectStation(e.station.id)}
+                  onRemove={handleRemove}
+                  airTempIsForecast={e.airTempIsForecast}
+                  windIsForecast={e.windIsForecast}
+                  daylight={e.daylight}
+                />
+              </div>
               {selectedStationId === e.station.id && (
-                <div className="col-span-full">
+                <div ref={timelineRef} className="col-span-full scroll-mt-20">
                   <WindTimeline
                     stationName={e.station.name}
                     history={e.history}
