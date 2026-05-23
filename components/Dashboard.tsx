@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import StationCard from './StationCard';
 import WindTimeline from './WindTimeline';
 import GoWindow from './GoWindow';
@@ -143,25 +143,19 @@ export default function Dashboard() {
     setSelectedStationId(stationId);
   };
 
-  // When a station is selected (from card click or from GoWindow), scroll the
-  // timeline into view. Defensive: if a layout issue ever pushes it off-screen,
-  // the user still sees it appear.
+  // When a station is selected (from card click or from GoWindow ranking),
+  // smooth-scroll the bottom timeline section into view so the user doesn't
+  // have to hunt for it.
   useEffect(() => {
     if (!selectedStationId) return;
-    // Wait for the timeline DOM to render before scrolling
     const id = window.setTimeout(() => {
-      timelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      timelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 50);
     return () => window.clearTimeout(id);
   }, [selectedStationId]);
 
   const handleSelectFromRanking = useCallback((stationId: string) => {
     setSelectedStationId(stationId);
-    // Scroll the station's card into view first, then the timeline (which is
-    // immediately beneath it) will follow naturally via the effect above.
-    window.setTimeout(() => {
-      stationRefs.current[stationId]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 0);
   }, []);
 
   // Build effectiveStations: synthesize current from forecast for stations with no live data
@@ -213,6 +207,8 @@ export default function Dashboard() {
       windIsForecast,
     };
   });
+
+  const selectedEntry = effectiveStations.find((e) => e.station.id === selectedStationId) ?? null;
 
   const greatStations = effectiveStations
     .filter((e) => {
@@ -298,42 +294,48 @@ export default function Dashboard() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-8">
           {effectiveStations.map((e) => (
-            <Fragment key={e.station.id}>
-              <div
-                ref={(el) => {
-                  stationRefs.current[e.station.id] = el;
-                }}
-                className="scroll-mt-20"
-              >
-                <StationCard
-                  id={e.station.id}
-                  name={e.station.name}
-                  description={e.station.description}
-                  current={e.current}
-                  history={e.history}
-                  recentObs={e.recentObs}
-                  isSelected={selectedStationId === e.station.id}
-                  onClick={() => handleSelectStation(e.station.id)}
-                  onRemove={handleRemove}
-                  airTempIsForecast={e.airTempIsForecast}
-                  windIsForecast={e.windIsForecast}
-                  daylight={e.daylight}
-                />
-              </div>
-              {selectedStationId === e.station.id && (
-                <div ref={timelineRef} className="col-span-full scroll-mt-20">
-                  <WindTimeline
-                    stationName={e.station.name}
-                    history={e.history}
-                    forecast={e.forecast}
-                    historyIsModelled={e.historyIsModelled}
-                  />
-                </div>
-              )}
-            </Fragment>
+            <div
+              key={e.station.id}
+              ref={(el) => {
+                stationRefs.current[e.station.id] = el;
+              }}
+              className="scroll-mt-20"
+            >
+              <StationCard
+                id={e.station.id}
+                name={e.station.name}
+                description={e.station.description}
+                current={e.current}
+                history={e.history}
+                recentObs={e.recentObs}
+                isSelected={selectedStationId === e.station.id}
+                onClick={() => handleSelectStation(e.station.id)}
+                onRemove={handleRemove}
+                airTempIsForecast={e.airTempIsForecast}
+                windIsForecast={e.windIsForecast}
+                daylight={e.daylight}
+              />
+            </div>
           ))}
         </div>
       )}
+
+      <section ref={timelineRef} className="scroll-mt-20">
+        <h2 className="text-xl font-bold text-slate-200 mb-2">Wind Timeline</h2>
+        {!selectedEntry && (
+          <p className="text-slate-500 text-sm mb-4">
+            Click a station card above to see its 24h history and 96h forecast.
+          </p>
+        )}
+        {selectedEntry && (
+          <WindTimeline
+            stationName={selectedEntry.station.name}
+            history={selectedEntry.history}
+            forecast={selectedEntry.forecast}
+            historyIsModelled={selectedEntry.historyIsModelled}
+          />
+        )}
+      </section>
 
       {showAdd && (
         <AddStationDialog
