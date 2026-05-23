@@ -11,7 +11,7 @@ export default function Page() {
               Swedish Wind Foil Opportunities
             </h1>
           </div>
-          <div className="text-slate-500 text-xs hidden md:block shrink-0 ml-3">Auto-refreshes every 5 min</div>
+          <div className="text-slate-500 text-xs hidden md:block shrink-0 ml-3">Auto-refreshes every 15 min</div>
         </div>
       </header>
 
@@ -43,7 +43,7 @@ export default function Page() {
       </main>
 
       <footer className="border-t border-slate-800 mt-8 py-4 text-center text-slate-600 text-xs">
-        Data: SMHI Open Data · VIVA Sjöfartsverket · Updates every 5 min
+        Data: SMHI Open Data · VIVA Sjöfartsverket · Updates every 15 min
       </footer>
     </div>
   );

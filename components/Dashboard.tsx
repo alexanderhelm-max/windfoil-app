@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import StationCard from './StationCard';
 import WindTimeline from './WindTimeline';
 import GoWindow from './GoWindow';
@@ -21,6 +21,14 @@ interface FetchedData {
   historyIsModelled?: boolean;
 }
 
+function formatRefreshTime(epochMs: number): string {
+  return new Date(epochMs).toLocaleTimeString('sv-SE', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
 function buildUrl(s: Station): string {
   const params = new URLSearchParams();
   if (s.vivaId != null) params.set('vivaId', String(s.vivaId));
@@ -37,6 +45,9 @@ export default function Dashboard() {
   const [dataLoaded, setDataLoaded] = useState(false);
   const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null);
+  const stationRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const timelineRef = useRef<HTMLDivElement | null>(null);
 
   // Hydrate from localStorage
   useEffect(() => {
@@ -44,12 +55,17 @@ export default function Dashboard() {
     setHydrated(true);
   }, []);
 
-  // Fetch data when stations change
+  // Fetch data when stations change, refresh every 15 minutes,
+  // and re-fetch when the page becomes visible again (iOS home-screen apps
+  // suspend timers while backgrounded).
   useEffect(() => {
     if (!hydrated) return;
     let cancelled = false;
-    setDataLoaded(false);
-    (async () => {
+    let lastFetchAt = 0;
+
+    const fetchAll = async (showLoading: boolean) => {
+      if (showLoading) setDataLoaded(false);
+      lastFetchAt = Date.now();
       const entries = await Promise.all(
         stations.map(async (s) => {
           try {
@@ -71,9 +87,24 @@ export default function Dashboard() {
       if (cancelled) return;
       setData(Object.fromEntries(entries));
       setDataLoaded(true);
-    })();
+      setLastRefreshAt(Date.now());
+    };
+
+    fetchAll(true);
+    const intervalId = setInterval(() => fetchAll(false), 15 * 60 * 1000);
+
+    const handleVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      // Only refetch if data is older than 1 minute — avoids spamming on
+      // rapid focus toggles, but ensures fresh data after backgrounding.
+      if (Date.now() - lastFetchAt > 60 * 1000) fetchAll(false);
+    };
+    document.addEventListener('visibilitychange', handleVisible);
+
     return () => {
       cancelled = true;
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisible);
     };
   }, [stations, hydrated]);
 
@@ -111,6 +142,21 @@ export default function Dashboard() {
     }
     setSelectedStationId(stationId);
   };
+
+  // When a station is selected (from card click or from GoWindow ranking),
+  // smooth-scroll the bottom timeline section into view so the user doesn't
+  // have to hunt for it.
+  useEffect(() => {
+    if (!selectedStationId) return;
+    const id = window.setTimeout(() => {
+      timelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+    return () => window.clearTimeout(id);
+  }, [selectedStationId]);
+
+  const handleSelectFromRanking = useCallback((stationId: string) => {
+    setSelectedStationId(stationId);
+  }, []);
 
   // Build effectiveStations: synthesize current from forecast for stations with no live data
   const effectiveStations = stations.map((s) => {
@@ -198,7 +244,14 @@ export default function Dashboard() {
     <div className="max-w-6xl mx-auto px-4 py-6">
       {/* Toolbar */}
       <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
-        <h2 className="text-xl font-bold text-slate-200">Stations</h2>
+        <div className="flex items-baseline gap-3 flex-wrap">
+          <h2 className="text-xl font-bold text-slate-200">Stations</h2>
+          {lastRefreshAt && (
+            <span className="text-xs text-slate-500 tabular-nums" title="Time of last data refresh">
+              Last refresh {formatRefreshTime(lastRefreshAt)}
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-3">
           {!isDefault && (
             <button
@@ -219,7 +272,9 @@ export default function Dashboard() {
 
       <AlertBanner greatStations={greatStations} />
 
-      {dataLoaded && <GoWindow stationForecasts={stationForecasts} />}
+      {dataLoaded && (
+        <GoWindow stationForecasts={stationForecasts} onStationSelect={handleSelectFromRanking} />
+      )}
       {!dataLoaded && (
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 mb-6 text-slate-400 text-sm">
           Loading station data...
@@ -239,26 +294,33 @@ export default function Dashboard() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-8">
           {effectiveStations.map((e) => (
-            <StationCard
+            <div
               key={e.station.id}
-              id={e.station.id}
-              name={e.station.name}
-              description={e.station.description}
-              current={e.current}
-              history={e.history}
-              recentObs={e.recentObs}
-              isSelected={selectedStationId === e.station.id}
-              onClick={() => handleSelectStation(e.station.id)}
-              onRemove={handleRemove}
-              airTempIsForecast={e.airTempIsForecast}
-              windIsForecast={e.windIsForecast}
-              daylight={e.daylight}
-            />
+              ref={(el) => {
+                stationRefs.current[e.station.id] = el;
+              }}
+              className="scroll-mt-20"
+            >
+              <StationCard
+                id={e.station.id}
+                name={e.station.name}
+                description={e.station.description}
+                current={e.current}
+                history={e.history}
+                recentObs={e.recentObs}
+                isSelected={selectedStationId === e.station.id}
+                onClick={() => handleSelectStation(e.station.id)}
+                onRemove={handleRemove}
+                airTempIsForecast={e.airTempIsForecast}
+                windIsForecast={e.windIsForecast}
+                daylight={e.daylight}
+              />
+            </div>
           ))}
         </div>
       )}
 
-      <section>
+      <section ref={timelineRef} className="scroll-mt-20">
         <h2 className="text-xl font-bold text-slate-200 mb-2">Wind Timeline</h2>
         {!selectedEntry && (
           <p className="text-slate-500 text-sm mb-4">

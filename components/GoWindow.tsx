@@ -37,9 +37,11 @@ interface StationForecast {
 
 interface GoWindowProps {
   stationForecasts: StationForecast[];
+  onStationSelect?: (stationId: string) => void;
 }
 
 interface RankedStation {
+  stationId: string;
   stationName: string;
   start: Date;
   end: Date;
@@ -72,6 +74,7 @@ const conditionRank: Record<ConditionLevel, number> = {
 };
 
 function findBestWindowInRange(
+  stationId: string,
   stationName: string,
   forecast: ForecastPoint[],
   startHours: number,
@@ -145,6 +148,7 @@ function findBestWindowInRange(
   const best = scored[0];
 
   return {
+    stationId,
     stationName,
     start: best.start,
     end: best.end,
@@ -161,7 +165,7 @@ function findBestWindowInRange(
 
 function rank(stationForecasts: StationForecast[], startHours: number, endHours: number): RankedStation[] {
   const ranked = stationForecasts
-    .map((sf) => findBestWindowInRange(sf.stationName, sf.forecast, startHours, endHours))
+    .map((sf) => findBestWindowInRange(sf.stationId, sf.stationName, sf.forecast, startHours, endHours))
     .filter((r): r is RankedStation => r !== null);
   // Sort by condition rank, then avg wind speed, then duration, then less gustiness
   ranked.sort((a, b) => {
@@ -189,6 +193,7 @@ function rankNow(stationForecasts: StationForecast[]): RankedStation[] {
       const condition = getCondition(c.avgWind, c.heading);
       const gustRatio = c.avgWind > 0 ? c.gust / c.avgWind : 1;
       return {
+        stationId: sf.stationId,
         stationName: sf.stationName,
         start: now,
         end: now,
@@ -218,10 +223,12 @@ function RankedList({
   title,
   items,
   emptyContent,
+  onItemClick,
 }: {
   title: string;
   items: RankedStation[];
   emptyContent?: React.ReactNode;
+  onItemClick?: (stationId: string) => void;
 }) {
   const shareMessage = formatRankingMessage(
     title,
@@ -248,74 +255,103 @@ function RankedList({
         )
       ) : (
         <ol className="space-y-1.5">
-          {items.map((it, idx) => (
-            <li
-              key={`${title}-${it.stationName}-${idx}`}
-              className="flex items-center gap-2 rounded-lg px-3 py-2"
-              style={{
-                backgroundColor: conditionColors[it.condition] + '15',
-                borderLeft: `3px solid ${conditionColors[it.condition]}`,
-              }}
-            >
-              <span className="text-slate-500 font-mono text-xs w-5 shrink-0">#{idx + 1}</span>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-baseline gap-2 flex-wrap">
-                  <span className="font-semibold text-white truncate">{it.stationName}</span>
-                  <span
-                    className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
-                    style={{
-                      backgroundColor: conditionColors[it.condition] + '40',
-                      color: conditionColors[it.condition],
-                    }}
-                  >
-                    {conditionLabels[it.condition]}
-                  </span>
-                </div>
-                <div className="text-xs text-slate-400 flex items-center gap-1 flex-wrap">
-                  <span>
-                    {it.durationHours === 0
-                      ? 'Right now'
-                      : `${formatWindowTime(it.start)} (${it.durationHours.toFixed(0)}h)`}
-                  </span>
-                  <span className="text-slate-600">·</span>
-                  <span className="inline-flex items-center gap-0.5">
-                    <svg
-                      className="w-3 h-3 text-slate-300 inline-block"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                      style={{ transform: `rotate(${(it.avgWindDir + 180) % 360}deg)` }}
+          {items.map((it, idx) => {
+            const clickable = !!onItemClick;
+            const inner = (
+              <>
+                <span className="text-slate-500 font-mono text-xs w-5 shrink-0">#{idx + 1}</span>
+                <div className="flex-1 min-w-0 text-left">
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="font-semibold text-white truncate">{it.stationName}</span>
+                    <span
+                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                      style={{
+                        backgroundColor: conditionColors[it.condition] + '40',
+                        color: conditionColors[it.condition],
+                      }}
                     >
-                      <path d="M12 2L8 20l4-3 4 3z" />
-                    </svg>
-                    <span className="text-slate-300">{headingToCompass(it.avgWindDir)}</span>
-                    <span className="text-slate-500">{Math.round(it.avgWindDir)}°</span>
-                    {bearingDiff(it.startWindDir, it.endWindDir) > 45 && (
-                      <span
-                        className="ml-1 text-amber-400"
-                        title={`Wind shifts from ${headingToCompass(it.startWindDir)} to ${headingToCompass(it.endWindDir)} during this window`}
+                      {conditionLabels[it.condition]}
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-400 flex items-center gap-1 flex-wrap">
+                    <span>
+                      {it.durationHours === 0
+                        ? 'Right now'
+                        : `${formatWindowTime(it.start)} (${it.durationHours.toFixed(0)}h)`}
+                    </span>
+                    <span className="text-slate-600">·</span>
+                    <span className="inline-flex items-center gap-0.5">
+                      <svg
+                        className="w-3 h-3 text-slate-300 inline-block"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        style={{ transform: `rotate(${(it.avgWindDir + 180) % 360}deg)` }}
                       >
-                        ↻ {headingToCompass(it.startWindDir)}→{headingToCompass(it.endWindDir)}
-                      </span>
-                    )}
-                  </span>
-                  <span className="text-slate-600">·</span>
-                  <span className="text-slate-200 font-medium">{it.avgWindSpeed.toFixed(1)}</span>
-                  <span className="text-slate-500">/</span>
-                  <span className="text-slate-200 font-medium">{it.peakWindSpeed.toFixed(1)}</span>
-                  <span className="text-slate-500">
-                    m/s {it.durationHours === 0 ? 'avg/gust' : 'avg/peak'}
-                  </span>
+                        <path d="M12 2L8 20l4-3 4 3z" />
+                      </svg>
+                      <span className="text-slate-300">{headingToCompass(it.avgWindDir)}</span>
+                      <span className="text-slate-500">{Math.round(it.avgWindDir)}°</span>
+                      {bearingDiff(it.startWindDir, it.endWindDir) > 45 && (
+                        <span
+                          className="ml-1 text-amber-400"
+                          title={`Wind shifts from ${headingToCompass(it.startWindDir)} to ${headingToCompass(it.endWindDir)} during this window`}
+                        >
+                          ↻ {headingToCompass(it.startWindDir)}→{headingToCompass(it.endWindDir)}
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-slate-600">·</span>
+                    <span className="text-slate-200 font-medium">{it.avgWindSpeed.toFixed(1)}</span>
+                    <span className="text-slate-500">/</span>
+                    <span className="text-slate-200 font-medium">{it.peakWindSpeed.toFixed(1)}</span>
+                    <span className="text-slate-500">
+                      m/s {it.durationHours === 0 ? 'avg/gust' : 'avg/peak'}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            </li>
-          ))}
+                {clickable && (
+                  <span
+                    aria-hidden="true"
+                    className="text-slate-400 text-lg leading-none shrink-0 ml-1"
+                  >
+                    ›
+                  </span>
+                )}
+              </>
+            );
+
+            const rowStyle = {
+              backgroundColor: conditionColors[it.condition] + '15',
+              borderLeft: `3px solid ${conditionColors[it.condition]}`,
+            } as const;
+
+            return (
+              <li key={`${title}-${it.stationName}-${idx}`}>
+                {clickable ? (
+                  <button
+                    type="button"
+                    onClick={() => onItemClick?.(it.stationId)}
+                    className="w-full flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer hover:brightness-125 active:brightness-110 transition focus:outline-none focus:ring-2 focus:ring-white/30"
+                    style={rowStyle}
+                    title={`Open ${it.stationName} timeline`}
+                  >
+                    {inner}
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={rowStyle}>
+                    {inner}
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ol>
       )}
     </div>
   );
 }
 
-export default function GoWindow({ stationForecasts }: GoWindowProps) {
+export default function GoWindow({ stationForecasts, onStationSelect }: GoWindowProps) {
   const now = rankNow(stationForecasts);
   const next6h = rank(stationForecasts, 0, 6);
   const next24h = rank(stationForecasts, 0, 24);
@@ -346,8 +382,13 @@ export default function GoWindow({ stationForecasts }: GoWindowProps) {
       <div className="mb-1">
         <p className="text-xs text-slate-500 uppercase tracking-wider mb-2">Go now?</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
-          <RankedList title="Right now" items={now} emptyContent={calmEmpty} />
-          <RankedList title="Next 6h" items={next6h} />
+          <RankedList
+            title="Right now"
+            items={now}
+            emptyContent={calmEmpty}
+            onItemClick={onStationSelect}
+          />
+          <RankedList title="Next 6h" items={next6h} onItemClick={onStationSelect} />
         </div>
       </div>
 
