@@ -25,11 +25,12 @@ export async function GET(req: NextRequest) {
     smhiObsId ? fetchSmhiHistory(Number(smhiObsId)) : Promise.resolve(null),
     lat && lon
       ? fetchSmhiForecast(Number(lat), Number(lon))
-      : Promise.resolve({ points: [], error: null }),
+      : Promise.resolve({ points: [], error: null, source: null as null }),
     lat && lon ? fetchDaylight(Number(lat), Number(lon)) : Promise.resolve(null),
   ]);
 
   const forecast = forecastRes.points;
+  const forecastSource = forecastRes.source;
   const diag: Record<string, string> = {};
   if (forecastRes.error) diag.forecast = forecastRes.error;
 
@@ -51,7 +52,7 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json(
-    { current, history, forecast, daylight, historyIsModelled, diag },
+    { current, history, forecast, forecastSource, daylight, historyIsModelled, diag },
     { headers: { 'Cache-Control': 's-maxage=300, stale-while-revalidate=60' } }
   );
 }

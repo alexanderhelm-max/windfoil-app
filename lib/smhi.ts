@@ -1,5 +1,6 @@
 const OBS_BASE = 'https://opendata-download-metobs.smhi.se/api/version/latest';
-const FCT_BASE = 'https://opendata-download-metfcst.smhi.se/api/category/pmp3g/version/2/geotype/point';
+// SMHI replaced pmp3g/v2 with snow1g/v1 on 2026-03-31. Nordic-only point forecast.
+const FCT_BASE = 'https://opendata-download-metfcst.smhi.se/api/category/snow1g/version/1/geotype/point';
 
 /**
  * Fetch JSON with a timeout and one retry on transient failures (timeout, 5xx, 429).
@@ -174,56 +175,105 @@ export async function fetchOpenMeteoHistory(
   };
 }
 
+export type ForecastSource = 'open-meteo' | 'smhi';
+
+interface RawHourly {
+  epoch: number;
+  windSpeed: number;
+  windDir: number;
+  gust: number;
+  airTemp: number | undefined;
+}
+
+// 0–48h: hourly. 48–96h: every 6 hours (00, 06, 12, 18 UTC).
+function thinAndFormat(all: RawHourly[]): ForecastPoint[] {
+  const now = Date.now();
+  const cutoff48h = now + 48 * 3600 * 1000;
+  return all
+    .filter((p) => p.epoch >= now)
+    .filter((p) => {
+      if (p.epoch <= cutoff48h) return true;
+      return new Date(p.epoch).getUTCHours() % 6 === 0;
+    })
+    .map((p) => ({
+      time: new Date(p.epoch).toISOString(),
+      windSpeed: p.windSpeed,
+      windDir: p.windDir,
+      gust: p.gust,
+      airTemp: p.airTemp,
+    }));
+}
+
+/**
+ * SMHI metfcst (snow1g v1) point forecast. Nordic region only — all our stations are
+ * in Sweden so this works as an Open-Meteo fallback. Hourly for ~50h, then 6h out to
+ * ~7d, then 12h out to ~11d. URL takes lon BEFORE lat.
+ */
+interface Snow1gEntry {
+  time: string; // ISO Zulu, e.g. "2026-05-26T15:00:00Z"
+  data: {
+    wind_speed?: number;
+    wind_from_direction?: number;
+    wind_speed_of_gust?: number;
+    air_temperature?: number;
+  };
+}
+
+async function fetchSmhiMetfcstForecast(
+  lat: number,
+  lon: number
+): Promise<{ points: ForecastPoint[]; error: string | null }> {
+  const url = `${FCT_BASE}/lon/${lon.toFixed(4)}/lat/${lat.toFixed(4)}/data.json`;
+  const { data, error } = await fetchJsonWithDiag(url, { timeoutMs: 8000, revalidate: 3600 });
+  if (error || !data) return { points: [], error };
+  const series = (data as { timeSeries?: Snow1gEntry[] }).timeSeries ?? [];
+  if (series.length === 0) return { points: [], error: 'empty timeSeries' };
+  const all: RawHourly[] = series.map((ts) => ({
+    epoch: new Date(ts.time).getTime(),
+    windSpeed: ts.data.wind_speed ?? 0,
+    windDir: ts.data.wind_from_direction ?? 0,
+    gust: ts.data.wind_speed_of_gust ?? 0,
+    airTemp: ts.data.air_temperature,
+  }));
+  return { points: thinAndFormat(all), error: null };
+}
+
 /**
  * timezone=GMT so returned timestamps are UTC; we append 'Z' and parse to correct epochs
  * regardless of the server's local timezone (Vercel runs in UTC, browsers vary).
+ * Falls back to SMHI metfcst when Open-Meteo is unreachable.
  */
 export async function fetchSmhiForecast(
   lat: number,
   lon: number
-): Promise<{ points: ForecastPoint[]; error: string | null }> {
+): Promise<{ points: ForecastPoint[]; error: string | null; source: ForecastSource | null }> {
   const url =
     `https://api.open-meteo.com/v1/forecast` +
     `?latitude=${lat}&longitude=${lon}` +
     `&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m,temperature_2m` +
     `&forecast_days=4&wind_speed_unit=ms&timezone=GMT`;
   const { data, error } = await fetchJsonWithDiag(url, { timeoutMs: 8000, revalidate: 3600 });
-  if (error || !data) return { points: [], error };
+  if (error || !data) {
+    const fb = await fetchSmhiMetfcstForecast(lat, lon);
+    if (fb.points.length > 0) return { points: fb.points, error: null, source: 'smhi' };
+    return {
+      points: [],
+      error: `open-meteo: ${error ?? 'no data'}; smhi: ${fb.error ?? 'no data'}`,
+      source: null,
+    };
+  }
   const hourly = (data as { hourly?: Record<string, unknown> }).hourly ?? {};
   const times: string[] = (hourly.time as string[]) ?? [];
   const speeds: number[] = (hourly.wind_speed_10m as number[]) ?? [];
   const dirs: number[] = (hourly.wind_direction_10m as number[]) ?? [];
   const gusts: number[] = (hourly.wind_gusts_10m as number[]) ?? [];
   const temps: number[] = (hourly.temperature_2m as number[]) ?? [];
-  const now = Date.now();
-  const cutoff48h = now + 48 * 3600 * 1000;
-
-  const all = times.map((t, i) => {
-    const epoch = new Date(`${t}Z`).getTime();
-    return {
-      time: new Date(epoch).toISOString(),
-      epoch,
-      windSpeed: speeds[i] ?? 0,
-      windDir: dirs[i] ?? 0,
-      gust: gusts[i] ?? 0,
-      airTemp: temps[i],
-    };
-  });
-
-  // 0–48h: hourly. 48–96h: every 6 hours (00, 06, 12, 18 UTC).
-  const points = all
-    .filter((p) => p.epoch >= now)
-    .filter((p) => {
-      if (p.epoch <= cutoff48h) return true;
-      const d = new Date(p.epoch);
-      return d.getUTCHours() % 6 === 0;
-    })
-    .map(({ time, windSpeed, windDir, gust, airTemp }) => ({
-      time,
-      windSpeed,
-      windDir,
-      gust,
-      airTemp,
-    }));
-  return { points, error: null };
+  const all: RawHourly[] = times.map((t, i) => ({
+    epoch: new Date(`${t}Z`).getTime(),
+    windSpeed: speeds[i] ?? 0,
+    windDir: dirs[i] ?? 0,
+    gust: gusts[i] ?? 0,
+    airTemp: temps[i],
+  }));
+  return { points: thinAndFormat(all), error: null, source: 'open-meteo' };
 }
