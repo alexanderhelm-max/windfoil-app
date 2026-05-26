@@ -19,6 +19,8 @@ interface FetchedData {
   daylight: DaylightInfo | null;
   /** True when history came from Open-Meteo model rather than SMHI measured obs */
   historyIsModelled?: boolean;
+  /** Per-source failure reasons from the API (e.g. { forecast: 'timeout after 8000ms' }) */
+  diag?: Record<string, string>;
 }
 
 function formatRefreshTime(epochMs: number): string {
@@ -229,6 +231,18 @@ export default function Dashboard() {
     forecast: e.forecast,
   }));
 
+  // Surface a forecast outage: if data has loaded but every station's forecast
+  // came back empty AND at least one reported an error, the Open-Meteo feed is down.
+  const stationsWithData = stations.filter((s) => data[s.id]);
+  const forecastErrors = stationsWithData
+    .map((s) => data[s.id]?.diag?.forecast)
+    .filter((e): e is string => !!e);
+  const allForecastsEmpty =
+    stationsWithData.length > 0 &&
+    stationsWithData.every((s) => (data[s.id]?.forecast?.length ?? 0) === 0);
+  const forecastOutage =
+    dataLoaded && allForecastsEmpty && forecastErrors.length > 0 ? forecastErrors[0] : null;
+
   const existingIds = new Set(stations.map((s) => s.id));
   const isDefault =
     stations.length === DEFAULT_STATIONS.length &&
@@ -269,6 +283,15 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+
+      {forecastOutage && (
+        <div className="bg-amber-900/30 border border-amber-700/60 rounded-xl px-4 py-3 mb-4 text-sm text-amber-200">
+          <span className="font-semibold">Forecast unavailable.</span> The Open-Meteo forecast
+          feed isn&apos;t responding ({forecastOutage}), so the Plan-ahead rankings and
+          forecast-only stations (e.g. Marstrand, Lysekil) have no data. Live conditions from VIVA
+          stations are unaffected.
+        </div>
+      )}
 
       <AlertBanner greatStations={greatStations} />
 
