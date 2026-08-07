@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import {
   ComposedChart,
   Line,
@@ -31,6 +32,13 @@ interface ChartDataPoint {
   fctGust?: number;
 }
 
+type RangeKey = 'now' | 'today' | 'ahead';
+const RANGES: Record<RangeKey, { label: string; pastH: number; futureH: number }> = {
+  now: { label: 'Now', pastH: 2, futureH: 4 },
+  today: { label: 'Today', pastH: 4, futureH: 12 },
+  ahead: { label: 'Ahead', pastH: 0, futureH: 96 },
+};
+
 function formatAxisTime(epochMs: number): string {
   const d = new Date(epochMs);
   const now = new Date();
@@ -60,6 +68,11 @@ export default function WindTimeline({
   forecast,
   historyIsModelled = false,
 }: WindTimelineProps) {
+  const [range, setRange] = useState<RangeKey>('today');
+  const nowEpoch = Date.now();
+  const windowStart = nowEpoch - RANGES[range].pastH * 3600 * 1000;
+  const windowEnd = nowEpoch + RANGES[range].futureH * 3600 * 1000;
+
   // Build merged dataset
   const dataMap = new Map<number, ChartDataPoint>();
 
@@ -92,7 +105,10 @@ export default function WindTimeline({
     dataMap.set(t, existing);
   }
 
-  const chartData = Array.from(dataMap.values()).sort((a, b) => a.time - b.time);
+  const allData = Array.from(dataMap.values()).sort((a, b) => a.time - b.time);
+  // Keep one point of "padding" on each side so lines don't get clipped to a stub
+  // just inside the window edge.
+  const chartData = allData.filter((p) => p.time >= windowStart && p.time <= windowEnd);
 
   // Bridge: stamp the last observed values onto the last obs point as forecast values,
   // AND onto the first forecast point as obs values — so both lines visually connect
@@ -106,8 +122,6 @@ export default function WindTimeline({
     chartData[firstFctIdx].obsAvg = chartData[firstFctIdx].fctAvg;
     chartData[firstFctIdx].obsGust = chartData[firstFctIdx].fctGust;
   }
-
-  const nowEpoch = Date.now();
 
   interface TooltipPayloadEntry {
     name?: string;
@@ -138,7 +152,7 @@ export default function WindTimeline({
     );
   };
 
-  if (chartData.length === 0) {
+  if (allData.length === 0) {
     return (
       <div className="bg-slate-800 rounded-xl p-6 text-center text-slate-400">
         No data available for {stationName}
@@ -148,17 +162,38 @@ export default function WindTimeline({
 
   return (
     <div className="bg-slate-800 rounded-xl p-4">
-      <h3 className="text-lg font-semibold mb-4 text-slate-200 flex items-center gap-2 flex-wrap">
-        {stationName} — Wind Timeline
-        {historyIsModelled && (
-          <span
-            className="text-xs font-normal px-2 py-0.5 rounded-full bg-slate-700 text-slate-400"
-            title="Past wind shown is from Open-Meteo model — no measured station nearby."
-          >
-            past = model
-          </span>
-        )}
-      </h3>
+      <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
+        <h3 className="text-lg font-semibold text-slate-200 flex items-center gap-2 flex-wrap">
+          {stationName} — Wind Timeline
+          {historyIsModelled && (
+            <span
+              className="text-xs font-normal px-2 py-0.5 rounded-full bg-slate-700 text-slate-400"
+              title="Past wind shown is from Open-Meteo model — no measured station nearby."
+            >
+              past = model
+            </span>
+          )}
+        </h3>
+        <div className="inline-flex rounded-lg bg-slate-900/60 p-0.5 border border-slate-700">
+          {(Object.keys(RANGES) as RangeKey[]).map((k) => {
+            const active = range === k;
+            return (
+              <button
+                key={k}
+                onClick={() => setRange(k)}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition ${
+                  active
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                aria-pressed={active}
+              >
+                {RANGES[k].label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
       <ResponsiveContainer width="100%" height={300}>
         <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
           {/* Background color bands for condition levels */}
@@ -172,13 +207,14 @@ export default function WindTimeline({
           <XAxis
             dataKey="time"
             type="number"
-            domain={['dataMin', 'dataMax']}
+            domain={[windowStart, windowEnd]}
+            allowDataOverflow
             scale="time"
             tickFormatter={formatAxisTime}
             tick={{ fill: '#94a3b8', fontSize: 11 }}
             tickLine={{ stroke: '#334155' }}
             axisLine={{ stroke: '#334155' }}
-            minTickGap={60}
+            minTickGap={40}
           />
           <YAxis
             domain={[0, 20]}
