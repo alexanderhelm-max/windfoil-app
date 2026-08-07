@@ -7,7 +7,7 @@ import GoWindow from './GoWindow';
 import AlertBanner from './AlertBanner';
 import AddStationDialog from './AddStationDialog';
 import { VivaObservation } from '@/lib/viva';
-import { SmhiObsHistory, ForecastPoint, DaylightInfo } from '@/lib/smhi';
+import { SmhiObsHistory, ForecastPoint, DaylightInfo, ForecastSource } from '@/lib/smhi';
 import { getCondition } from '@/lib/wind-utils';
 import { Station, DEFAULT_STATIONS } from '@/lib/stations';
 import { loadStations, saveStations, resetStations } from '@/lib/station-store';
@@ -16,9 +16,12 @@ interface FetchedData {
   current: VivaObservation | null;
   history: SmhiObsHistory | null;
   forecast: ForecastPoint[];
+  forecastSource?: ForecastSource | null;
   daylight: DaylightInfo | null;
   /** True when history came from Open-Meteo model rather than SMHI measured obs */
   historyIsModelled?: boolean;
+  /** Per-source failure reasons from the API (e.g. { forecast: 'timeout after 8000ms' }) */
+  diag?: Record<string, string>;
 }
 
 function formatRefreshTime(epochMs: number): string {
@@ -229,6 +232,23 @@ export default function Dashboard() {
     forecast: e.forecast,
   }));
 
+  // Surface forecast status:
+  //   - outage: all forecasts empty AND at least one error → both providers down
+  //   - fallback: forecasts populated but coming from SMHI (Open-Meteo down, SMHI saved us)
+  const stationsWithData = stations.filter((s) => data[s.id]);
+  const forecastErrors = stationsWithData
+    .map((s) => data[s.id]?.diag?.forecast)
+    .filter((e): e is string => !!e);
+  const allForecastsEmpty =
+    stationsWithData.length > 0 &&
+    stationsWithData.every((s) => (data[s.id]?.forecast?.length ?? 0) === 0);
+  const forecastOutage =
+    dataLoaded && allForecastsEmpty && forecastErrors.length > 0 ? forecastErrors[0] : null;
+  const usingSmhiFallback =
+    dataLoaded &&
+    !forecastOutage &&
+    stationsWithData.some((s) => data[s.id]?.forecastSource === 'smhi');
+
   const existingIds = new Set(stations.map((s) => s.id));
   const isDefault =
     stations.length === DEFAULT_STATIONS.length &&
@@ -269,6 +289,20 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+
+      {forecastOutage && (
+        <div className="bg-amber-900/30 border border-amber-700/60 rounded-xl px-4 py-3 mb-4 text-sm text-amber-200">
+          <span className="font-semibold">Forecast unavailable.</span> Both Open-Meteo and the
+          SMHI fallback failed ({forecastOutage}), so the Plan-ahead rankings and forecast-only
+          stations (e.g. Marstrand, Lysekil) have no data. Live conditions from VIVA stations are
+          unaffected.
+        </div>
+      )}
+      {usingSmhiFallback && (
+        <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl px-4 py-2 mb-4 text-xs text-slate-400">
+          Open-Meteo is unreachable — showing SMHI metfcst forecast instead.
+        </div>
+      )}
 
       <AlertBanner greatStations={greatStations} />
 
