@@ -1,4 +1,5 @@
 import { haversineKm, STATION_MAX_KM } from './geo';
+import { VIVA_STATIONS_SNAPSHOT } from './viva-stations.snapshot';
 
 const VIVA_BASE = 'https://services.viva.sjofartsverket.se:8080/output/vivaoutputservice.svc/vivastation';
 
@@ -44,23 +45,23 @@ interface VivaStationListRaw {
   Lon?: number;
 }
 
-/**
- * Nearest VIVA stations to a point, closest first.
- *
- * Returns several candidates rather than one because many VIVA stations carry
- * only water level or temperature sensors — the caller has to fetch a station
- * to discover whether it reports wind, and falls through to the next if not.
- *
- * Best-effort: VIVA's roster does not always carry coordinates, and stations
- * without them are skipped. An empty result just means the caller uses its
- * next-best source.
- */
-export async function findNearestVivaStations(
+function rankByDistance(
+  roster: { id: number; name: string; lat: number; lon: number }[],
   lat: number,
   lon: number,
-  limit = 3,
-  maxKm = STATION_MAX_KM
-): Promise<VivaStationRef[]> {
+  limit: number,
+  maxKm: number
+): VivaStationRef[] {
+  return roster
+    .map((s) => ({ id: s.id, name: s.name, distanceKm: haversineKm(lat, lon, s.lat, s.lon) }))
+    .filter((s) => s.distanceKm <= maxKm)
+    .sort((a, b) => a.distanceKm - b.distanceKm)
+    .slice(0, limit);
+}
+
+async function fetchVivaRoster(): Promise<
+  { id: number; name: string; lat: number; lon: number }[]
+> {
   try {
     // Trailing slash AND Accept: application/json are both required; without
     // them the WCF service returns an HTML help page instead of JSON.
@@ -74,17 +75,32 @@ export async function findNearestVivaStations(
     const list: VivaStationListRaw[] = data?.GetStationsResult?.Stations ?? [];
     return list
       .filter((s) => typeof s.Lat === 'number' && typeof s.Lon === 'number')
-      .map((s) => ({
-        id: s.ID,
-        name: s.Name,
-        distanceKm: haversineKm(lat, lon, s.Lat as number, s.Lon as number),
-      }))
-      .filter((s) => s.distanceKm <= maxKm)
-      .sort((a, b) => a.distanceKm - b.distanceKm)
-      .slice(0, limit);
+      .map((s) => ({ id: s.ID, name: s.Name, lat: s.Lat as number, lon: s.Lon as number }));
   } catch {
     return [];
   }
+}
+
+/**
+ * Nearest VIVA stations to a point, closest first.
+ *
+ * Returns several candidates rather than one because many VIVA stations carry
+ * only water level or temperature sensors — the caller has to fetch a station
+ * to discover whether it reports wind, and falls through to the next if not.
+ *
+ * Uses VIVA's live roster (cached for a day), falling back to the committed
+ * snapshot in lib/viva-stations.snapshot.ts when the roster request fails —
+ * so nearest-station resolution keeps working through VIVA roster outages.
+ */
+export async function findNearestVivaStations(
+  lat: number,
+  lon: number,
+  limit = 3,
+  maxKm = STATION_MAX_KM
+): Promise<VivaStationRef[]> {
+  const live = await fetchVivaRoster();
+  const roster = live.length > 0 ? live : VIVA_STATIONS_SNAPSHOT;
+  return rankByDistance(roster, lat, lon, limit, maxKm);
 }
 
 export async function fetchVivaStation(id: number): Promise<VivaObservation | null> {

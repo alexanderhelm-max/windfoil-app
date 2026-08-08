@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "NODE_OPTIONS='--localstorage-file=/tmp/windfoil-ls.json' next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "snapshot:viva": "node scripts/snapshot-viva-stations.mjs"
   },
   "dependencies": {
     "next": "^15.5.4",
