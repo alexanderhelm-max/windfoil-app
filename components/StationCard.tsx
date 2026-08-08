@@ -5,7 +5,7 @@ import { SmhiObsHistory, DaylightInfo } from '@/lib/smhi';
 import {
   getCondition,
   getGustLevel,
-  getTrendDetail,
+  getHourTrend,
   headingToCompass,
   conditionColors,
   conditionLabels,
@@ -90,9 +90,9 @@ export default function StationCard({
 
   const condition: ConditionLevel = getCondition(avgWind, heading);
   const gustLevel: GustLevel = getGustLevel(avgWind, gust);
-  const trendDetail = getTrendDetail(recentObs);
-  const trend = trendDetail.direction;
-  const trendRate = trendDetail.ratePerHour;
+  // Null when the last hour is too thin to read a trend from — the arrow is
+  // simply omitted rather than shown as a confident "steady".
+  const trendDetail = getHourTrend(recentObs);
   const compassDir = headingToCompass(heading);
   const condColor = conditionColors[condition];
   const wetsuit = getWetsuitHint(current?.waterTemp);
@@ -181,24 +181,29 @@ export default function StationCard({
               {gust.toFixed(1)}
             </span>
             <span className="text-slate-400 text-sm">gust</span>
-            <span
-              className={`ml-1 text-sm font-semibold ${
-                trend === 'building'
-                  ? 'text-green-400'
-                  : trend === 'dropping'
-                  ? 'text-orange-400'
-                  : 'text-slate-400'
-              }`}
-              title={`Trend: ${trend} (${trendRate.toFixed(1)} m/s per hour)`}
-            >
-              {trendIcons[trend]}
-              {trend !== 'steady' && (
-                <span className="ml-0.5 tabular-nums">
-                  {trendRate > 0 ? '+' : ''}
-                  {trendRate.toFixed(1)}/h
-                </span>
-              )}
-            </span>
+            {trendDetail && (
+              <span
+                className={`ml-1 text-sm font-semibold ${
+                  trendDetail.direction === 'building'
+                    ? 'text-green-400'
+                    : trendDetail.direction === 'dropping'
+                    ? 'text-orange-400'
+                    : 'text-slate-400'
+                }`}
+                title={`Last hour: ${trendDetail.direction} (${trendDetail.ratePerHour.toFixed(
+                  1
+                )} m/s per hour)`}
+              >
+                {trendIcons[trendDetail.direction]}
+                {trendDetail.direction !== 'steady' && (
+                  <span className="ml-0.5 tabular-nums">
+                    {trendDetail.ratePerHour > 0 ? '+' : ''}
+                    {trendDetail.ratePerHour.toFixed(1)}/h
+                  </span>
+                )}
+                <span className="ml-1 text-[10px] font-normal text-slate-500">1h</span>
+              </span>
+            )}
           </div>
 
           {/* Direction */}

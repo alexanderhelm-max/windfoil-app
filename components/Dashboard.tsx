@@ -252,8 +252,13 @@ export default function Dashboard() {
   // Build effectiveStations: synthesize current from forecast for stations with no live data
   const effectiveStations = stations.map((s) => {
     const d = data[s.id];
+    // A full hour of readings, so the card's trend is a real one-hour slope
+    // rather than whatever the last few samples happened to do.
+    const hourAgo = Date.now() - 3600_000;
     const recentObs =
-      d?.history?.windSpeed.slice(-3).map((p) => ({ time: p.time, wind: p.value })) ?? [];
+      d?.history?.windSpeed
+        .filter((p) => p.time >= hourAgo)
+        .map((p) => ({ time: p.time, wind: p.value })) ?? [];
     let current = d?.current ?? null;
     let airTempIsForecast = false;
     let windIsForecast = false;

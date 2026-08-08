@@ -119,6 +119,43 @@ function spotIcon(
   });
 }
 
+/**
+ * Wheel and trackpad zoom, replacing Leaflet's own.
+ *
+ * Leaflet applies one sensitivity to every wheel event, but the gestures that
+ * produce them are wildly different: a mouse notch arrives as a single large
+ * delta, a two-finger scroll as a stream of medium ones, and a Mac trackpad
+ * pinch as ctrl+wheel with deltas so small that a full pinch barely moved the
+ * map. Scaling each kind separately makes all three feel direct.
+ *
+ * Zooming is anchored at the pointer and left unanimated, which with
+ * zoomSnap 0 tracks the gesture continuously instead of easing after it.
+ */
+function WheelZoom() {
+  const map = useMap();
+  useEffect(() => {
+    const el = map.getContainer();
+
+    function onWheel(e: WheelEvent) {
+      e.preventDefault();
+      let delta = e.deltaY;
+      if (e.deltaMode === 1) delta *= 20; // lines → px
+      else if (e.deltaMode === 2) delta *= 60; // pages → px
+
+      // ctrlKey marks a pinch; its deltas are an order of magnitude smaller.
+      // Large deltas mean a mouse notch, which needs damping instead.
+      const pxPerLevel = e.ctrlKey ? 18 : Math.abs(delta) > 60 ? 110 : 45;
+      const target = map.getZoom() - delta / pxPerLevel;
+      const clamped = Math.min(map.getMaxZoom(), Math.max(map.getMinZoom(), target));
+      map.setZoomAround(map.mouseEventToContainerPoint(e), clamped, { animate: false });
+    }
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [map]);
+  return null;
+}
+
 /** Lifts the map's zoom so markers can adapt their density. */
 function ZoomWatcher({ onZoom }: { onZoom: (z: number) => void }) {
   const map = useMapEvents({ zoomend: () => onZoom(map.getZoom()) });
@@ -376,19 +413,17 @@ export default function WindMap({
     <div className="relative rounded-xl overflow-hidden border border-slate-700 mb-6">
       <MapContainer
         center={center}
+        // Wheel handled by WheelZoom below, which tells pinch, trackpad and
+        // mouse-notch gestures apart; touch pinch stays with Leaflet.
+        scrollWheelZoom={false}
         zoom={9}
-        scrollWheelZoom
         preferCanvas
         zoomControl={false}
-        // Continuous zoom rather than Leaflet's default integer steps: the
-        // wheel and pinch glide, and the +/- buttons move half a level at a
-        // time instead of jumping. Wheel sensitivity stays at Leaflet's
-        // default — raising it made a trackpad feel sluggish, and smooth is
-        // about removing the steps, not slowing the gesture down.
+        // Continuous zoom rather than Leaflet's default integer steps, so
+        // gestures track the map instead of snapping between whole levels;
+        // the +/- buttons move half a level at a time.
         zoomSnap={0}
         zoomDelta={0.5}
-        wheelPxPerZoomLevel={60}
-        wheelDebounceTime={20}
         zoomAnimation
         style={{ height: '68vh', minHeight: 420, background: '#0f172a' }}
       >
@@ -400,6 +435,7 @@ export default function WindMap({
         {/* Bottom-right rather than Leaflet's default top-left: reachable by
             thumb on a phone, and clear of the layer toggle. */}
         <ZoomControl position="bottomright" />
+        <WheelZoom />
         <ZoomWatcher onZoom={setZoom} />
         <ViewportWatcher onView={loadLive} />
         <FitBounds entries={entries} />
