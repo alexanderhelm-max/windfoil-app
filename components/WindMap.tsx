@@ -34,6 +34,7 @@ interface WindMapProps {
   entries: MapEntry[];
   selectedStationId: string | null;
   onSelect: (stationId: string) => void;
+  onDeselect: () => void;
   onOpenTimeline: (stationId: string) => void;
   onAddStation: (station: Station) => void;
   existingIds: Set<string>;
@@ -56,13 +57,16 @@ interface SmhiMapStation {
   dir: number | null;
 }
 
+/** Readable against the dark basemap — a dimmer grey disappears into it. */
+const NO_DATA_COLOR = '#94a3b8';
+
 /**
  * Colour for a station dot. Direction shifts the thresholds by 1 m/s when the
  * wind is off-sector, so where a station reports no direction we evaluate at a
  * mid-sector bearing — that grades on speed alone rather than guessing badly.
  */
 function dotColor(avg: number | null, dir: number | null): string {
-  if (avg == null) return '#475569';
+  if (avg == null) return NO_DATA_COLOR;
   return conditionColors[getCondition(avg, dir ?? 250)];
 }
 
@@ -243,6 +247,7 @@ export default function WindMap({
   entries,
   selectedStationId,
   onSelect,
+  onDeselect,
   onOpenTimeline,
   onAddStation,
   existingIds,
@@ -289,6 +294,18 @@ export default function WindMap({
   );
 
   const selected = entries.find((e) => e.station.id === selectedStationId) ?? null;
+
+  /**
+   * Only one card shows at a time, so opening a candidate has to drop the
+   * picked spot — otherwise tapping a station dot while a spot card is open
+   * looks like nothing happened.
+   */
+  function showCandidate(open: () => void) {
+    onDeselect();
+    setPendingViva(null);
+    setPendingSmhi(null);
+    open();
+  }
 
   // One request serves both layers: SMHI comes back whole (its bulk endpoint
   // is a single upstream call) while VIVA is limited to what's on screen.
@@ -365,10 +382,13 @@ export default function WindMap({
         zoomControl={false}
         // Continuous zoom rather than Leaflet's default integer steps: the
         // wheel and pinch glide, and the +/- buttons move half a level at a
-        // time instead of jumping.
+        // time instead of jumping. Wheel sensitivity stays at Leaflet's
+        // default — raising it made a trackpad feel sluggish, and smooth is
+        // about removing the steps, not slowing the gesture down.
         zoomSnap={0}
         zoomDelta={0.5}
-        wheelPxPerZoomLevel={140}
+        wheelPxPerZoomLevel={60}
+        wheelDebounceTime={20}
         zoomAnimation
         style={{ height: '68vh', minHeight: 420, background: '#0f172a' }}
       >
@@ -391,15 +411,15 @@ export default function WindMap({
               <CircleMarker
                 key={`smhi-${s.id}`}
                 center={[s.lat, s.lon]}
-                radius={s.avg == null ? 3 : 4.5}
+                radius={s.avg == null ? 4 : 5}
                 pathOptions={{
                   color,
-                  weight: 1,
-                  opacity: s.avg == null ? 0.4 : 0.9,
+                  weight: 1.5,
+                  opacity: s.avg == null ? 0.85 : 1,
                   fillColor: color,
-                  fillOpacity: s.avg == null ? 0.3 : 0.65,
+                  fillOpacity: s.avg == null ? 0.35 : 0.7,
                 }}
-                eventHandlers={{ click: () => setPendingSmhi(s) }}
+                eventHandlers={{ click: () => showCandidate(() => setPendingSmhi(s)) }}
               >
                 <Tooltip direction="top" offset={[0, -4]}>
                   {s.name}
@@ -417,15 +437,15 @@ export default function WindMap({
               <CircleMarker
                 key={v.id}
                 center={[v.lat, v.lon]}
-                radius={live ? 5 : 3.5}
+                radius={live ? 5.5 : 4}
                 pathOptions={{
                   color,
-                  weight: live ? 1.5 : 1,
-                  opacity: live ? 0.95 : 0.5,
+                  weight: 1.5,
+                  opacity: live ? 1 : 0.85,
                   fillColor: color,
-                  fillOpacity: live ? 0.7 : 0.35,
+                  fillOpacity: live ? 0.75 : 0.35,
                 }}
-                eventHandlers={{ click: () => setPendingViva(v) }}
+                eventHandlers={{ click: () => showCandidate(() => setPendingViva(v)) }}
               >
                 <Tooltip direction="top" offset={[0, -4]}>
                   {v.name}
@@ -441,6 +461,7 @@ export default function WindMap({
           selectedStationId={selectedStationId}
           onSelect={(id) => {
             setPendingViva(null);
+            setPendingSmhi(null);
             onSelect(id);
           }}
         />
@@ -474,7 +495,7 @@ export default function WindMap({
       {/* Info card — one panel for both a picked spot and a candidate station,
           so tapping anything on the map always answers in the same place. */}
       {selected && (
-        <InfoCard onClose={() => onSelect(selected.station.id)}>
+        <InfoCard onClose={onDeselect}>
           <SpotDetails entry={selected} onOpenTimeline={() => onOpenTimeline(selected.station.id)} />
         </InfoCard>
       )}

@@ -234,6 +234,8 @@ export default function Dashboard() {
     setSelectedStationId(stationId);
   }, []);
 
+  const handleMapDeselect = useCallback(() => setSelectedStationId(null), []);
+
   const handleOpenTimeline = useCallback((stationId: string) => {
     skipScrollRef.current = false;
     setSelectedStationId(stationId);
@@ -436,6 +438,7 @@ export default function Dashboard() {
           }))}
           selectedStationId={selectedStationId}
           onSelect={handleMapSelect}
+          onDeselect={handleMapDeselect}
           onOpenTimeline={handleOpenTimeline}
           onAddStation={handleAdd}
           existingIds={existingIds}
