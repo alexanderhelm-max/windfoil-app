@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import StationCard from './StationCard';
 import WindTimeline from './WindTimeline';
 import GoWindow from './GoWindow';
@@ -12,6 +13,18 @@ import { getCondition } from '@/lib/wind-utils';
 import { Station, DEFAULT_STATIONS } from '@/lib/stations';
 import { loadStations, saveStations, resetStations } from '@/lib/station-store';
 import { buildShareSpotsUrl, decodeStationsFromParam, copyToClipboard } from '@/lib/share';
+
+// Leaflet touches window at import time, so the map can only load client-side.
+const WindMap = dynamic(() => import('./WindMap'), {
+  ssr: false,
+  loading: () => (
+    <div className="rounded-xl border border-slate-700 bg-slate-800/50 mb-8 flex items-center justify-center text-slate-500 text-sm" style={{ height: '65vh', minHeight: 380 }}>
+      Loading map…
+    </div>
+  ),
+});
+
+const VIEW_KEY = 'windfoil:view:v1';
 
 interface FetchedData {
   current: VivaObservation | null;
@@ -59,8 +72,10 @@ export default function Dashboard() {
   const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null);
   const [pendingImport, setPendingImport] = useState<Station[] | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
+  const [view, setView] = useState<'list' | 'map'>('list');
   const stationRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const skipScrollRef = useRef(false);
 
   // Hydrate from localStorage, and pick up a shared station list from the
   // URL (?spots=...) — offered as an import rather than applied silently.
@@ -68,6 +83,7 @@ export default function Dashboard() {
     const loaded = loadStations();
     setStations(loaded);
     setHydrated(true);
+    if (localStorage.getItem(VIEW_KEY) === 'map') setView('map');
 
     const param = new URLSearchParams(window.location.search).get('spots');
     if (param) {
@@ -160,6 +176,11 @@ export default function Dashboard() {
     setSelectedStationId(null);
   }, []);
 
+  const switchView = useCallback((next: 'list' | 'map') => {
+    setView(next);
+    localStorage.setItem(VIEW_KEY, next);
+  }, []);
+
   const handleShareSpots = useCallback(async () => {
     const url = buildShareSpotsUrl(stations);
     // Native share sheet on mobile; clipboard on desktop.
@@ -196,11 +217,31 @@ export default function Dashboard() {
   // have to hunt for it.
   useEffect(() => {
     if (!selectedStationId) return;
+    // Selecting from the map only opens the marker popup; scrolling away from
+    // the map there would be jarring, so the popup's button scrolls instead.
+    if (skipScrollRef.current) {
+      skipScrollRef.current = false;
+      return;
+    }
     const id = window.setTimeout(() => {
       timelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 50);
     return () => window.clearTimeout(id);
   }, [selectedStationId]);
+
+  const handleMapSelect = useCallback((stationId: string) => {
+    skipScrollRef.current = true;
+    setSelectedStationId(stationId);
+  }, []);
+
+  const handleOpenTimeline = useCallback((stationId: string) => {
+    skipScrollRef.current = false;
+    setSelectedStationId(stationId);
+    // Same id as already selected wouldn't re-run the effect above, so scroll here.
+    window.setTimeout(() => {
+      timelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  }, []);
 
   const handleSelectFromRanking = useCallback((stationId: string) => {
     setSelectedStationId(stationId);
@@ -315,6 +356,20 @@ export default function Dashboard() {
       <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
         <div className="flex items-baseline gap-3 flex-wrap">
           <h2 className="text-xl font-bold text-slate-200">Stations</h2>
+          <div className="inline-flex rounded-lg bg-slate-900/60 p-0.5 border border-slate-700 self-center">
+            {(['list', 'map'] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => switchView(v)}
+                aria-pressed={view === v}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition capitalize ${
+                  view === v ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
           {lastRefreshAt && (
             <span className="text-xs text-slate-500 tabular-nums" title="Time of last data refresh">
               Last refresh {formatRefreshTime(lastRefreshAt)}
@@ -369,6 +424,24 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* In map view the map is the point of the page — it goes above the
+          banners and rankings, which stay available by scrolling. */}
+      {view === 'map' && (
+        <WindMap
+          entries={effectiveStations.map((e) => ({
+            station: e.station,
+            current: e.current,
+            windIsForecast: e.windIsForecast,
+            currentStation: e.currentStation,
+          }))}
+          selectedStationId={selectedStationId}
+          onSelect={handleMapSelect}
+          onOpenTimeline={handleOpenTimeline}
+          onAddStation={handleAdd}
+          existingIds={existingIds}
+        />
+      )}
+
       {forecastOutage && (
         <div className="bg-amber-900/30 border border-amber-700/60 rounded-xl px-4 py-3 mb-4 text-sm text-amber-200">
           <span className="font-semibold">Forecast unavailable.</span> Both Open-Meteo and the
@@ -394,7 +467,8 @@ export default function Dashboard() {
         </div>
       )}
 
-      {stations.length === 0 ? (
+      {view === 'list' &&
+        (stations.length === 0 ? (
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-8 text-center text-slate-400">
           <p className="mb-3">No stations yet.</p>
           <button
@@ -432,13 +506,15 @@ export default function Dashboard() {
             </div>
           ))}
         </div>
-      )}
+        ))}
 
       <section ref={timelineRef} className="scroll-mt-20">
         <h2 className="text-xl font-bold text-slate-200 mb-2">Wind Timeline</h2>
         {!selectedEntry && (
           <p className="text-slate-500 text-sm mb-4">
-            Click a station card above to see its 24h history and 96h forecast.
+            {view === 'map'
+              ? 'Tap a spot on the map to see its 24h history and 96h forecast.'
+              : 'Click a station card above to see its 24h history and 96h forecast.'}
           </p>
         )}
         {selectedEntry && (
