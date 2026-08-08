@@ -43,6 +43,66 @@ export interface SmhiObsPoint {
   value: number;
 }
 
+/** How far away a measuring station may be before we stop calling it "this spot's" wind. */
+export const OBS_STATION_MAX_KM = 35;
+
+export interface ObsStationRef {
+  id: number;
+  name: string;
+  distanceKm: number;
+}
+
+interface SmhiStationRaw {
+  key: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  active?: boolean;
+}
+
+function haversineKm(aLat: number, aLon: number, bLat: number, bLon: number): number {
+  const R = 6371;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(bLat - aLat);
+  const dLon = toRad(bLon - aLon);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+/**
+ * Find the closest active SMHI station that measures wind speed (parameter 4).
+ *
+ * We resolve this from SMHI's own live roster rather than hardcoding station
+ * ids: ids we can't verify would silently attribute a different spot's wind to
+ * this one, and the roster changes as stations come and go. The list is cached
+ * for a day — it rarely changes.
+ */
+export async function findNearestObsStation(
+  lat: number,
+  lon: number,
+  maxKm = OBS_STATION_MAX_KM
+): Promise<ObsStationRef | null> {
+  const { data } = await fetchJsonWithDiag(`${OBS_BASE}/parameter/4.json`, {
+    timeoutMs: 8000,
+    revalidate: 86400,
+  });
+  if (!data) return null;
+  const stations = (data as { station?: SmhiStationRaw[] }).station ?? [];
+  let best: ObsStationRef | null = null;
+  for (const s of stations) {
+    if (s.active === false) continue;
+    if (typeof s.latitude !== 'number' || typeof s.longitude !== 'number') continue;
+    const distanceKm = haversineKm(lat, lon, s.latitude, s.longitude);
+    if (distanceKm > maxKm) continue;
+    if (!best || distanceKm < best.distanceKm) {
+      best = { id: Number(s.key), name: s.name, distanceKm };
+    }
+  }
+  return best;
+}
+
 async function fetchObsParam(stationId: number, param: number): Promise<SmhiObsPoint[]> {
   try {
     const url = `${OBS_BASE}/parameter/${param}/station/${stationId}/period/latest-day/data.json`;

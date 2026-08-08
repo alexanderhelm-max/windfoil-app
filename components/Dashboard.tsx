@@ -20,6 +20,8 @@ interface FetchedData {
   daylight: DaylightInfo | null;
   /** True when history came from Open-Meteo model rather than SMHI measured obs */
   historyIsModelled?: boolean;
+  /** Set when past wind came from an auto-resolved nearby SMHI station */
+  obsStation?: { id: number; name: string; distanceKm: number } | null;
   /** Per-source failure reasons from the API (e.g. { forecast: 'timeout after 8000ms' }) */
   diag?: Record<string, string>;
 }
@@ -203,6 +205,7 @@ export default function Dashboard() {
       current,
       history: d?.history ?? null,
       historyIsModelled: d?.historyIsModelled ?? false,
+      obsStation: d?.obsStation ?? null,
       forecast: d?.forecast ?? [],
       daylight: d?.daylight ?? null,
       recentObs,
@@ -367,6 +370,7 @@ export default function Dashboard() {
             history={selectedEntry.history}
             forecast={selectedEntry.forecast}
             historyIsModelled={selectedEntry.historyIsModelled}
+            obsStation={selectedEntry.obsStation}
           />
         )}
       </section>

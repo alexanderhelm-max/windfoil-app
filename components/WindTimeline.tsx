@@ -21,6 +21,8 @@ interface WindTimelineProps {
   forecast: ForecastPoint[];
   /** True when history came from Open-Meteo model rather than measured SMHI obs */
   historyIsModelled?: boolean;
+  /** Set when past wind came from an auto-resolved nearby SMHI station */
+  obsStation?: { id: number; name: string; distanceKm: number } | null;
 }
 
 interface ChartDataPoint {
@@ -67,6 +69,7 @@ export default function WindTimeline({
   history,
   forecast,
   historyIsModelled = false,
+  obsStation = null,
 }: WindTimelineProps) {
   const [range, setRange] = useState<RangeKey>('today');
   const nowEpoch = Date.now();
@@ -169,14 +172,21 @@ export default function WindTimeline({
       <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
         <h3 className="text-lg font-semibold text-slate-200 flex items-center gap-2 flex-wrap">
           {stationName} — Wind Timeline
-          {historyIsModelled && (
+          {historyIsModelled ? (
             <span
               className="text-xs font-normal px-2 py-0.5 rounded-full bg-slate-700 text-slate-400"
-              title="Past wind shown is from Open-Meteo model — no measured station nearby."
+              title="Past wind shown is from Open-Meteo model — no measured station with fresh data nearby."
             >
               past = model
             </span>
-          )}
+          ) : obsStation ? (
+            <span
+              className="text-xs font-normal px-2 py-0.5 rounded-full bg-emerald-900/50 text-emerald-300"
+              title={`Past wind measured at SMHI station ${obsStation.name}, ${obsStation.distanceKm.toFixed(0)} km away.`}
+            >
+              measured · {obsStation.name} {obsStation.distanceKm.toFixed(0)} km
+            </span>
+          ) : null}
         </h3>
         <div className="inline-flex rounded-lg bg-slate-900/60 p-0.5 border border-slate-700">
           {(Object.keys(RANGES) as RangeKey[]).map((k) => {

@@ -5,7 +5,9 @@ import {
   fetchSmhiForecast,
   fetchDaylight,
   fetchOpenMeteoHistory,
+  findNearestObsStation,
   SmhiObsHistory,
+  ObsStationRef,
 } from '@/lib/smhi';
 
 function isEmptyHistory(h: SmhiObsHistory | null): boolean {
@@ -50,11 +52,29 @@ export async function GET(req: NextRequest) {
   const diag: Record<string, string> = {};
   if (forecastRes.error) diag.forecast = forecastRes.error;
 
-  // Fall back to Open-Meteo "model history" if SMHI has nothing, OR if the newest
-  // SMHI point is too stale to be useful in the chart's zoomed-in views.
+  // Resolve past wind, preferring real measurements over model output:
+  //   1. the explicitly configured SMHI station, if it has fresh data
+  //   2. the nearest active SMHI wind station, if it has fresh data
+  //   3. Open-Meteo model history (clearly labelled as modelled in the UI)
+  const isUsable = (h: SmhiObsHistory | null) => !isEmptyHistory(h) && !isStaleHistory(h);
+
   let history: SmhiObsHistory | null = smhiHistory;
   let historyIsModelled = false;
-  if ((isEmptyHistory(smhiHistory) || isStaleHistory(smhiHistory)) && lat && lon) {
+  let obsStation: ObsStationRef | null = null;
+
+  if (!isUsable(history) && lat && lon) {
+    const nearest = await findNearestObsStation(Number(lat), Number(lon));
+    // Skip if it resolves to the station we already tried and found unusable.
+    if (nearest && nearest.id !== Number(smhiObsId)) {
+      const nearestHistory = await fetchSmhiHistory(nearest.id);
+      if (isUsable(nearestHistory)) {
+        history = nearestHistory;
+        obsStation = nearest;
+      }
+    }
+  }
+
+  if (!isUsable(history) && lat && lon) {
     const om = await fetchOpenMeteoHistory(Number(lat), Number(lon));
     if (om.history) {
       history = om.history;
@@ -86,7 +106,7 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json(
-    { current, history, forecast, forecastSource, daylight, historyIsModelled, diag },
+    { current, history, forecast, forecastSource, daylight, historyIsModelled, obsStation, diag },
     { headers: { 'Cache-Control': 's-maxage=300, stale-while-revalidate=60' } }
   );
 }
