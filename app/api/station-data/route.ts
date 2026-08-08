@@ -13,6 +13,22 @@ function isEmptyHistory(h: SmhiObsHistory | null): boolean {
   return h.windSpeed.length === 0 && h.gust.length === 0;
 }
 
+/**
+ * Some SMHI obs stations return points but the newest one is hours old
+ * (station reporting gap, or we've paired a nearby station whose data doesn't
+ * refresh often). Treat "stale" the same as empty so the chart's "Now" view
+ * (which only shows the last ~2h) isn't left blank.
+ */
+function isStaleHistory(h: SmhiObsHistory | null, maxAgeMin = 90): boolean {
+  if (!h) return true;
+  const newest = Math.max(
+    h.windSpeed[h.windSpeed.length - 1]?.time ?? 0,
+    h.gust[h.gust.length - 1]?.time ?? 0
+  );
+  if (newest === 0) return true;
+  return Date.now() - newest > maxAgeMin * 60 * 1000;
+}
+
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const vivaId = sp.get('vivaId');
@@ -34,17 +50,35 @@ export async function GET(req: NextRequest) {
   const diag: Record<string, string> = {};
   if (forecastRes.error) diag.forecast = forecastRes.error;
 
-  // Fall back to Open-Meteo "model history" for stations with no SMHI obs paired
-  // (or where SMHI returned nothing usable). Better than an empty chart.
+  // Fall back to Open-Meteo "model history" if SMHI has nothing, OR if the newest
+  // SMHI point is too stale to be useful in the chart's zoomed-in views.
   let history: SmhiObsHistory | null = smhiHistory;
   let historyIsModelled = false;
-  if (isEmptyHistory(smhiHistory) && lat && lon) {
+  if ((isEmptyHistory(smhiHistory) || isStaleHistory(smhiHistory)) && lat && lon) {
     const om = await fetchOpenMeteoHistory(Number(lat), Number(lon));
     if (om.history) {
       history = om.history;
       historyIsModelled = true;
     }
     if (om.error) diag.history = om.error;
+  }
+
+  // Anchor the chart at NOW using VIVA's live observation — the freshest real
+  // data we have. Without this the obs line ends at the last hourly bucket
+  // (often 15–60 min old) and there's a visible gap up to the "NOW" marker.
+  if (current?.hasWind && history) {
+    const nowTs = new Date(current.updatedAt).getTime();
+    if (!isNaN(nowTs)) {
+      // Guard against duplicating an existing point at the same second.
+      const lastSpeedTs = history.windSpeed[history.windSpeed.length - 1]?.time ?? 0;
+      if (nowTs > lastSpeedTs) {
+        history.windSpeed.push({ time: nowTs, value: current.avgWind });
+        if (current.gust > 0) history.gust.push({ time: nowTs, value: current.gust });
+        if (typeof current.heading === 'number') {
+          history.windDir.push({ time: nowTs, value: current.heading });
+        }
+      }
+    }
   }
 
   if (Object.keys(diag).length > 0) {
