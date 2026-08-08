@@ -23,6 +23,8 @@ interface WindTimelineProps {
   historyIsModelled?: boolean;
   /** Source of measured past wind: which provider/station and how far away */
   obsStation?: { id: number; name: string; distanceKm: number; provider?: 'viva' | 'smhi' } | null;
+  /** Which forecast model produced the forecast points */
+  forecastSource?: 'open-meteo' | 'smhi' | null;
 }
 
 interface ChartDataPoint {
@@ -70,6 +72,7 @@ export default function WindTimeline({
   forecast,
   historyIsModelled = false,
   obsStation = null,
+  forecastSource = null,
 }: WindTimelineProps) {
   const [range, setRange] = useState<RangeKey>('today');
   const nowEpoch = Date.now();
@@ -193,6 +196,18 @@ export default function WindTimeline({
               title="Past wind measured at the station paired with this spot."
             >
               past: measured
+            </span>
+          )}
+          {forecast.length > 0 && forecastSource && (
+            <span
+              className="text-xs font-normal px-2 py-0.5 rounded-full bg-indigo-900/50 text-indigo-300"
+              title={
+                forecastSource === 'smhi'
+                  ? 'Forecast from SMHI point forecast (Open-Meteo was unavailable).'
+                  : 'Forecast from Open-Meteo (blend of weather models).'
+              }
+            >
+              fct: {forecastSource === 'smhi' ? 'SMHI' : 'Open-Meteo'}
             </span>
           )}
         </h3>
