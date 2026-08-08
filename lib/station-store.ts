@@ -9,10 +9,21 @@ export function loadStations(): Station[] {
     if (!raw) return DEFAULT_STATIONS;
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return DEFAULT_STATIONS;
-    return parsed as Station[];
+    return (parsed as Station[]).map(refreshFromDefaults);
   } catch {
     return DEFAULT_STATIONS;
   }
+}
+
+/**
+ * Saved lists are snapshots from whenever the user first visited, so fixes to
+ * DEFAULT_STATIONS (corrected coordinates, newly paired station ids) would
+ * never reach existing users. Refresh the data fields of any saved station
+ * that is still one of ours; user-added stations and removals are untouched.
+ */
+function refreshFromDefaults(station: Station): Station {
+  const def = DEFAULT_STATIONS.find((d) => d.id === station.id);
+  return def ? { ...def } : station;
 }
 
 export function saveStations(stations: Station[]): void {
