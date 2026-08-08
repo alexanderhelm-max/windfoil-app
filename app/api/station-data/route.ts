@@ -6,6 +6,7 @@ import {
   getVivaStationInfo,
   VivaObservation,
 } from '@/lib/viva';
+import { fetchHolfuyStation } from '@/lib/holfuy';
 import {
   fetchSmhiHistory,
   fetchSmhiForecast,
@@ -43,6 +44,7 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const vivaId = sp.get('vivaId');
   const smhiObsId = sp.get('smhiObsId');
+  const holfuyId = sp.get('holfuyId');
   const lat = sp.get('lat');
   const lon = sp.get('lon');
 
@@ -71,13 +73,29 @@ export async function GET(req: NextRequest) {
 
   // Resolve the live reading first, preferring real measurements over forecast:
   //   1. the spot's own VIVA station (freshest — updates every 5–15 min)
-  //   2. the nearest VIVA station that actually reports wind
-  //   3. (after history resolves below) the newest measured history point
-  //   4. nothing — the client then derives a reading from the forecast
+  //   2. the spot's own Holfuy station (spot-mounted, 1-min updates)
+  //   3. the nearest VIVA station that actually reports wind
+  //   4. (after history resolves below) the newest measured history point
+  //   5. nothing — the client then derives a reading from the forecast
   // Track which VIVA station supplied the wind: it is also the preferred
   // history source, since VIVA serves 24h series at 10-minute resolution.
   let currentStation: { name: string; distanceKm: number } | null = null;
   let liveVivaId: number | null = current?.hasWind && vivaId ? Number(vivaId) : null;
+
+  if (!current?.hasWind && holfuyId) {
+    const h = await fetchHolfuyStation(Number(holfuyId));
+    if (h.obs) {
+      // Keep locally measured temps from the spot's own VIVA station if any.
+      current = {
+        ...h.obs,
+        waterTemp: current?.waterTemp,
+        airTemp: current?.airTemp ?? h.obs.airTemp,
+      };
+      currentStation = { name: `Holfuy ${h.stationName ?? `#${holfuyId}`}`, distanceKm: 0 };
+    } else if (h.error) {
+      diag.holfuy = h.error;
+    }
+  }
 
   if (!current?.hasWind && lat && lon) {
     const candidates = (await findNearestVivaStations(Number(lat), Number(lon), 5)).filter(

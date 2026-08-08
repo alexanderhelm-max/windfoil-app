@@ -4,6 +4,9 @@ export interface Station {
   description: string;
   vivaId: number | null;
   smhiObsId: number | null;
+  /** Holfuy station id (holfuy.com) — spot-mounted community wind stations.
+   *  Requires HOLFUY_API_KEY on the server to be used. */
+  holfuyId?: number | null;
   lat: number;
   lon: number;
 }

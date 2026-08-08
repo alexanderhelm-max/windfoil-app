@@ -42,6 +42,7 @@ function buildUrl(s: Station): string {
   const params = new URLSearchParams();
   if (s.vivaId != null) params.set('vivaId', String(s.vivaId));
   if (s.smhiObsId != null) params.set('smhiObsId', String(s.smhiObsId));
+  if (s.holfuyId != null) params.set('holfuyId', String(s.holfuyId));
   params.set('lat', String(s.lat));
   params.set('lon', String(s.lon));
   return `/api/station-data?${params.toString()}`;

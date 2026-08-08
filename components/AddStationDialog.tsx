@@ -48,6 +48,7 @@ export default function AddStationDialog({ existingIds, onAdd, onClose }: AddSta
   const [customDesc, setCustomDesc] = useState('');
   const [customLat, setCustomLat] = useState('');
   const [customLon, setCustomLon] = useState('');
+  const [customHolfuy, setCustomHolfuy] = useState('');
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -160,12 +161,18 @@ export default function AddStationDialog({ existingIds, onAdd, onClose }: AddSta
       setError('Lat and lon must be numbers.');
       return;
     }
+    const holfuy = customHolfuy.trim() === '' ? null : parseInt(customHolfuy, 10);
+    if (holfuy !== null && isNaN(holfuy)) {
+      setError('Holfuy ID must be a number (or empty).');
+      return;
+    }
     commit({
       id: `custom-${Date.now()}`,
       name: customName.trim(),
       description: customDesc.trim() || 'Custom point',
       vivaId: null,
       smhiObsId: null,
+      holfuyId: holfuy,
       lat,
       lon,
     });
@@ -419,6 +426,19 @@ export default function AddStationDialog({ existingIds, onAdd, onClose }: AddSta
                     className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-white focus:outline-none focus:border-blue-400"
                   />
                 </div>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">
+                  Holfuy station ID (optional) — spot-mounted live wind from holfuy.com; the
+                  number in the station&apos;s URL. Requires HOLFUY_API_KEY on the server.
+                </label>
+                <input
+                  type="number"
+                  value={customHolfuy}
+                  onChange={(e) => setCustomHolfuy(e.target.value)}
+                  placeholder="e.g. 1234"
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-blue-400"
+                />
               </div>
               <button
                 onClick={addCustom}

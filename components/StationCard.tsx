@@ -265,9 +265,17 @@ export default function StationCard({
               {currentStation && !windIsForecast && (
                 <span
                   className="text-emerald-500/80 mr-1.5"
-                  title={`Measured at ${currentStation.name}, ${currentStation.distanceKm.toFixed(0)} km away — no sensor at this spot.`}
+                  title={
+                    currentStation.distanceKm < 0.5
+                      ? `Measured at ${currentStation.name}, at this spot.`
+                      : `Measured at ${currentStation.name}, ${currentStation.distanceKm.toFixed(0)} km away — no sensor at this spot.`
+                  }
                 >
-                  via {currentStation.name} {currentStation.distanceKm.toFixed(0)} km ·
+                  via {currentStation.name}
+                  {currentStation.distanceKm >= 0.5
+                    ? ` ${currentStation.distanceKm.toFixed(0)} km`
+                    : ''}{' '}
+                  ·
                 </span>
               )}
               Updated {formatUpdated(current.updatedAt)}
