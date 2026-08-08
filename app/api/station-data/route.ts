@@ -9,6 +9,7 @@ import {
 import {
   fetchSmhiHistory,
   fetchSmhiForecast,
+  fetchSmhiMetfcstForecast,
   fetchDaylight,
   fetchOpenMeteoHistory,
   findNearestObsStation,
@@ -45,18 +46,24 @@ export async function GET(req: NextRequest) {
   const lat = sp.get('lat');
   const lon = sp.get('lon');
 
-  const [vivaCurrent, smhiHistory, forecastRes, daylight] = await Promise.all([
+  const [vivaCurrent, smhiHistory, forecastRes, smhiFctRes, daylight] = await Promise.all([
     vivaId ? fetchVivaStation(Number(vivaId)) : Promise.resolve(null),
     smhiObsId ? fetchSmhiHistory(Number(smhiObsId)) : Promise.resolve(null),
     lat && lon
       ? fetchSmhiForecast(Number(lat), Number(lon))
       : Promise.resolve({ points: [], error: null, source: null as null }),
+    lat && lon
+      ? fetchSmhiMetfcstForecast(Number(lat), Number(lon))
+      : Promise.resolve({ points: [], error: null }),
     lat && lon ? fetchDaylight(Number(lat), Number(lon)) : Promise.resolve(null),
   ]);
 
   let current: VivaObservation | null = vivaCurrent;
   const forecast = forecastRes.points;
   const forecastSource = forecastRes.source;
+  // Second forecast opinion for the chart. When the primary already fell back
+  // to SMHI (Open-Meteo down), the second source would duplicate it — omit.
+  const forecastSmhi = forecastRes.source === 'open-meteo' ? smhiFctRes.points : [];
   const diag: Record<string, string> = {};
   if (forecastRes.error) diag.forecast = forecastRes.error;
 
@@ -199,6 +206,7 @@ export async function GET(req: NextRequest) {
       history,
       forecast,
       forecastSource,
+      forecastSmhi,
       daylight,
       historyIsModelled,
       obsStation,

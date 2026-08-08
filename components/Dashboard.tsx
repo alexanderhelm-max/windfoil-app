@@ -17,6 +17,8 @@ interface FetchedData {
   history: SmhiObsHistory | null;
   forecast: ForecastPoint[];
   forecastSource?: ForecastSource | null;
+  /** Second forecast opinion (SMHI point forecast) for the chart */
+  forecastSmhi?: ForecastPoint[];
   daylight: DaylightInfo | null;
   /** True when history came from Open-Meteo model rather than SMHI measured obs */
   historyIsModelled?: boolean;
@@ -210,6 +212,7 @@ export default function Dashboard() {
       obsStation: d?.obsStation ?? null,
       currentStation: d?.currentStation ?? null,
       forecastSource: d?.forecastSource ?? null,
+      forecastSmhi: d?.forecastSmhi ?? [],
       forecast: d?.forecast ?? [],
       daylight: d?.daylight ?? null,
       recentObs,
@@ -377,6 +380,7 @@ export default function Dashboard() {
             historyIsModelled={selectedEntry.historyIsModelled}
             obsStation={selectedEntry.obsStation}
             forecastSource={selectedEntry.forecastSource}
+            forecastSmhi={selectedEntry.forecastSmhi}
           />
         )}
       </section>

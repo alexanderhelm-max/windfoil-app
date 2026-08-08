@@ -255,14 +255,14 @@ interface RawHourly {
 }
 
 // 0–48h: hourly. 48–96h: every 6 hours (00, 06, 12, 18 UTC).
-// Includes the current-hour point (up to 60 min in the past) so the forecast
-// line starts at "now" instead of the next top-of-hour, avoiding a visible gap.
+// Strictly future points only: the chart anchors the obs line at NOW with the
+// live reading and bridges the forecast line from that anchor, so a pre-NOW
+// forecast point would just overlap measured history.
 function thinAndFormat(all: RawHourly[]): ForecastPoint[] {
   const now = Date.now();
   const cutoff48h = now + 48 * 3600 * 1000;
-  const includeFrom = now - 60 * 60 * 1000;
   return all
-    .filter((p) => p.epoch >= includeFrom)
+    .filter((p) => p.epoch >= now)
     .filter((p) => {
       if (p.epoch <= cutoff48h) return true;
       return new Date(p.epoch).getUTCHours() % 6 === 0;
@@ -291,7 +291,7 @@ interface Snow1gEntry {
   };
 }
 
-async function fetchSmhiMetfcstForecast(
+export async function fetchSmhiMetfcstForecast(
   lat: number,
   lon: number
 ): Promise<{ points: ForecastPoint[]; error: string | null }> {

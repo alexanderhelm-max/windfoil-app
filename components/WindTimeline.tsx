@@ -19,6 +19,8 @@ interface WindTimelineProps {
   stationName: string;
   history: SmhiObsHistory | null;
   forecast: ForecastPoint[];
+  /** Second forecast opinion (SMHI point forecast) rendered alongside the primary */
+  forecastSmhi?: ForecastPoint[];
   /** True when history came from Open-Meteo model rather than measured SMHI obs */
   historyIsModelled?: boolean;
   /** Source of measured past wind: which provider/station and how far away */
@@ -34,6 +36,8 @@ interface ChartDataPoint {
   obsGust?: number;
   fctAvg?: number;
   fctGust?: number;
+  smhiAvg?: number;
+  smhiGust?: number;
 }
 
 type RangeKey = 'now' | 'today' | 'ahead';
@@ -70,6 +74,7 @@ export default function WindTimeline({
   stationName,
   history,
   forecast,
+  forecastSmhi = [],
   historyIsModelled = false,
   obsStation = null,
   forecastSource = null,
@@ -110,6 +115,13 @@ export default function WindTimeline({
     existing.fctGust = f.gust;
     dataMap.set(t, existing);
   }
+  for (const f of forecastSmhi) {
+    const t = new Date(f.time).getTime();
+    const existing = dataMap.get(t) ?? { time: t, label: formatAxisTime(t) };
+    existing.smhiAvg = f.windSpeed;
+    existing.smhiGust = f.gust;
+    dataMap.set(t, existing);
+  }
 
   const allData = Array.from(dataMap.values()).sort((a, b) => a.time - b.time);
   // Keep one point of "padding" on each side so lines don't get clipped to a stub
@@ -131,6 +143,12 @@ export default function WindTimeline({
       chartData[firstFctIdx].obsAvg = chartData[firstFctIdx].fctAvg;
       chartData[firstFctIdx].obsGust = chartData[firstFctIdx].fctGust;
     }
+  }
+  // Same anchoring for the second forecast source, so the teal line also
+  // departs from the measured NOW point rather than floating in from nowhere.
+  if (lastObsIdx >= 0 && chartData.some((p) => p.smhiAvg !== undefined)) {
+    chartData[lastObsIdx].smhiAvg = chartData[lastObsIdx].obsAvg;
+    chartData[lastObsIdx].smhiGust = chartData[lastObsIdx].obsGust;
   }
 
   interface TooltipPayloadEntry {
@@ -202,12 +220,14 @@ export default function WindTimeline({
             <span
               className="text-xs font-normal px-2 py-0.5 rounded-full bg-indigo-900/50 text-indigo-300"
               title={
-                forecastSource === 'smhi'
-                  ? 'Forecast from SMHI point forecast (Open-Meteo was unavailable).'
-                  : 'Forecast from Open-Meteo (blend of weather models).'
+                forecastSmhi.length > 0
+                  ? 'Two forecast opinions: Open-Meteo (indigo) and SMHI point forecast (teal). Where they agree, trust it more.'
+                  : forecastSource === 'smhi'
+                    ? 'Forecast from SMHI point forecast (Open-Meteo was unavailable).'
+                    : 'Forecast from Open-Meteo (blend of weather models).'
               }
             >
-              fct: {forecastSource === 'smhi' ? 'SMHI' : 'Open-Meteo'}
+              fct: {forecastSmhi.length > 0 ? 'Open-Meteo + SMHI' : forecastSource === 'smhi' ? 'SMHI' : 'Open-Meteo'}
             </span>
           )}
         </h3>
@@ -305,10 +325,10 @@ export default function WindTimeline({
             connectNulls
             isAnimationActive={false}
           />
-          {/* Forecast avg */}
+          {/* Forecast avg (primary) */}
           <Line
             dataKey="fctAvg"
-            name="Fct avg"
+            name={forecastSource === 'smhi' ? 'SMHI avg' : 'OM avg'}
             stroke="#6366f1"
             strokeWidth={2}
             strokeDasharray="6 3"
@@ -316,10 +336,10 @@ export default function WindTimeline({
             connectNulls
             isAnimationActive={false}
           />
-          {/* Forecast gust */}
+          {/* Forecast gust (primary) */}
           <Line
             dataKey="fctGust"
-            name="Fct gust"
+            name={forecastSource === 'smhi' ? 'SMHI gust' : 'OM gust'}
             stroke="#a5b4fc"
             strokeWidth={1.5}
             strokeDasharray="2 2"
@@ -327,6 +347,31 @@ export default function WindTimeline({
             connectNulls
             isAnimationActive={false}
           />
+          {/* Forecast avg (second opinion: SMHI point forecast) */}
+          {forecastSmhi.length > 0 && (
+            <Line
+              dataKey="smhiAvg"
+              name="SMHI avg"
+              stroke="#2dd4bf"
+              strokeWidth={2}
+              strokeDasharray="6 3"
+              dot={false}
+              connectNulls
+              isAnimationActive={false}
+            />
+          )}
+          {forecastSmhi.length > 0 && (
+            <Line
+              dataKey="smhiGust"
+              name="SMHI gust"
+              stroke="#99f6e4"
+              strokeWidth={1}
+              strokeDasharray="2 3"
+              dot={false}
+              connectNulls
+              isAnimationActive={false}
+            />
+          )}
         </ComposedChart>
       </ResponsiveContainer>
       <div className="flex gap-4 mt-2 text-xs text-slate-500 justify-center flex-wrap">
