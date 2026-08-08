@@ -110,17 +110,21 @@ export default function WindTimeline({
   // just inside the window edge.
   const chartData = allData.filter((p) => p.time >= windowStart && p.time <= windowEnd);
 
-  // Bridge: stamp the last observed values onto the last obs point as forecast values,
-  // AND onto the first forecast point as obs values — so both lines visually connect
+  // Bridge: stamp the last observed values onto the last obs point as forecast
+  // values so the forecast line reaches (and continues past) the live "now"
+  // anchor. Only mirror into the reverse direction — obs onto the first
+  // forecast point — when the forecast comes strictly AFTER all obs; when a
+  // NOW-anchor sits between two hourly forecast buckets, doing the reverse
+  // would paint a phantom "measured" value that's actually just forecast.
   const lastObsIdx = chartData.reduce((best, p, i) => (p.obsAvg !== undefined ? i : best), -1);
   const firstFctIdx = chartData.findIndex((p) => p.fctAvg !== undefined);
   if (lastObsIdx >= 0 && firstFctIdx >= 0) {
-    // Anchor the forecast line at the last observed point
     chartData[lastObsIdx].fctAvg = chartData[lastObsIdx].obsAvg;
     chartData[lastObsIdx].fctGust = chartData[lastObsIdx].obsGust;
-    // Anchor the obs line at the first forecast point
-    chartData[firstFctIdx].obsAvg = chartData[firstFctIdx].fctAvg;
-    chartData[firstFctIdx].obsGust = chartData[firstFctIdx].fctGust;
+    if (firstFctIdx > lastObsIdx) {
+      chartData[firstFctIdx].obsAvg = chartData[firstFctIdx].fctAvg;
+      chartData[firstFctIdx].obsGust = chartData[firstFctIdx].fctGust;
+    }
   }
 
   interface TooltipPayloadEntry {

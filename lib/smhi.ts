@@ -186,11 +186,14 @@ interface RawHourly {
 }
 
 // 0–48h: hourly. 48–96h: every 6 hours (00, 06, 12, 18 UTC).
+// Includes the current-hour point (up to 60 min in the past) so the forecast
+// line starts at "now" instead of the next top-of-hour, avoiding a visible gap.
 function thinAndFormat(all: RawHourly[]): ForecastPoint[] {
   const now = Date.now();
   const cutoff48h = now + 48 * 3600 * 1000;
+  const includeFrom = now - 60 * 60 * 1000;
   return all
-    .filter((p) => p.epoch >= now)
+    .filter((p) => p.epoch >= includeFrom)
     .filter((p) => {
       if (p.epoch <= cutoff48h) return true;
       return new Date(p.epoch).getUTCHours() % 6 === 0;
