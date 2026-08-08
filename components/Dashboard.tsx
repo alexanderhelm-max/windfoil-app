@@ -11,6 +11,7 @@ import { SmhiObsHistory, ForecastPoint, DaylightInfo, ForecastSource } from '@/l
 import { getCondition } from '@/lib/wind-utils';
 import { Station, DEFAULT_STATIONS } from '@/lib/stations';
 import { loadStations, saveStations, resetStations } from '@/lib/station-store';
+import { buildShareSpotsUrl, decodeStationsFromParam, copyToClipboard } from '@/lib/share';
 
 interface FetchedData {
   current: VivaObservation | null;
@@ -56,13 +57,27 @@ export default function Dashboard() {
   const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null);
+  const [pendingImport, setPendingImport] = useState<Station[] | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
   const stationRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const timelineRef = useRef<HTMLDivElement | null>(null);
 
-  // Hydrate from localStorage
+  // Hydrate from localStorage, and pick up a shared station list from the
+  // URL (?spots=...) — offered as an import rather than applied silently.
   useEffect(() => {
-    setStations(loadStations());
+    const loaded = loadStations();
+    setStations(loaded);
     setHydrated(true);
+
+    const param = new URLSearchParams(window.location.search).get('spots');
+    if (param) {
+      const shared = decodeStationsFromParam(param);
+      const existing = new Set(loaded.map((s) => s.id));
+      const fresh = shared?.filter((s) => !existing.has(s.id)) ?? [];
+      if (fresh.length > 0) setPendingImport(fresh);
+      // Strip the param so reloads and copied URLs don't re-trigger the offer.
+      window.history.replaceState(null, '', window.location.pathname);
+    }
   }, []);
 
   // Fetch data when stations change, refresh every 15 minutes,
@@ -144,6 +159,29 @@ export default function Dashboard() {
     setStations([...defaults]);
     setSelectedStationId(null);
   }, []);
+
+  const handleShareSpots = useCallback(async () => {
+    const url = buildShareSpotsUrl(stations);
+    // Native share sheet on mobile; clipboard on desktop.
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({ title: 'My windfoil spots', url });
+        return;
+      } catch {
+        // User cancelled the sheet — fall through to clipboard.
+      }
+    }
+    if (await copyToClipboard(url)) {
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2500);
+    }
+  }, [stations]);
+
+  const handleImportShared = useCallback(() => {
+    if (!pendingImport) return;
+    updateStations([...stations, ...pendingImport]);
+    setPendingImport(null);
+  }, [pendingImport, stations, updateStations]);
 
   const handleSelectStation = (stationId: string) => {
     if (selectedStationId === stationId) {
@@ -293,6 +331,13 @@ export default function Dashboard() {
             </button>
           )}
           <button
+            onClick={handleShareSpots}
+            className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium rounded-md transition"
+            title="Share your station list as a link — recipients get an import prompt."
+          >
+            {shareCopied ? 'Link copied!' : 'Share spots'}
+          </button>
+          <button
             onClick={() => setShowAdd(true)}
             className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-md transition"
           >
@@ -300,6 +345,29 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+
+      {pendingImport && (
+        <div className="bg-blue-900/30 border border-blue-700/60 rounded-xl px-4 py-3 mb-4 text-sm text-blue-200 flex items-center justify-between gap-3 flex-wrap">
+          <span>
+            <span className="font-semibold">Shared spots:</span>{' '}
+            {pendingImport.map((s) => s.name).join(', ')} — add to your list?
+          </span>
+          <span className="flex gap-2 shrink-0">
+            <button
+              onClick={handleImportShared}
+              className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-md transition"
+            >
+              Add {pendingImport.length === 1 ? 'it' : `all ${pendingImport.length}`}
+            </button>
+            <button
+              onClick={() => setPendingImport(null)}
+              className="px-3 py-1 text-blue-300 hover:text-white text-xs rounded-md transition"
+            >
+              Dismiss
+            </button>
+          </span>
+        </div>
+      )}
 
       {forecastOutage && (
         <div className="bg-amber-900/30 border border-amber-700/60 rounded-xl px-4 py-3 mb-4 text-sm text-amber-200">
