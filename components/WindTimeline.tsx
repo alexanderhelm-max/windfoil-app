@@ -21,8 +21,8 @@ interface WindTimelineProps {
   forecast: ForecastPoint[];
   /** True when history came from Open-Meteo model rather than measured SMHI obs */
   historyIsModelled?: boolean;
-  /** Set when past wind came from an auto-resolved nearby SMHI station */
-  obsStation?: { id: number; name: string; distanceKm: number } | null;
+  /** Source of measured past wind: which provider/station and how far away */
+  obsStation?: { id: number; name: string; distanceKm: number; provider?: 'viva' | 'smhi' } | null;
 }
 
 interface ChartDataPoint {
@@ -182,16 +182,17 @@ export default function WindTimeline({
           ) : obsStation ? (
             <span
               className="text-xs font-normal px-2 py-0.5 rounded-full bg-emerald-900/50 text-emerald-300"
-              title={`Past wind measured at SMHI station ${obsStation.name}, ${obsStation.distanceKm.toFixed(0)} km away.`}
+              title={`Past wind measured at ${obsStation.provider === 'viva' ? 'VIVA' : 'SMHI'} station ${obsStation.name}, ${obsStation.distanceKm.toFixed(0)} km away.`}
             >
-              past: SMHI {obsStation.name} · {obsStation.distanceKm.toFixed(0)} km
+              past: {obsStation.provider === 'viva' ? 'VIVA' : 'SMHI'} {obsStation.name} ·{' '}
+              {obsStation.distanceKm < 1.5 ? '<2' : obsStation.distanceKm.toFixed(0)} km
             </span>
           ) : (
             <span
               className="text-xs font-normal px-2 py-0.5 rounded-full bg-emerald-900/50 text-emerald-300"
-              title="Past wind measured at the SMHI station paired with this spot."
+              title="Past wind measured at the station paired with this spot."
             >
-              past: SMHI measured
+              past: measured
             </span>
           )}
         </h3>

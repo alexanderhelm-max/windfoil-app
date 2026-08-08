@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchVivaStation, findNearestVivaStations, VivaObservation } from '@/lib/viva';
+import {
+  fetchVivaStation,
+  fetchVivaHistory,
+  findNearestVivaStations,
+  getVivaStationInfo,
+  VivaObservation,
+} from '@/lib/viva';
 import {
   fetchSmhiHistory,
   fetchSmhiForecast,
@@ -54,49 +60,17 @@ export async function GET(req: NextRequest) {
   const diag: Record<string, string> = {};
   if (forecastRes.error) diag.forecast = forecastRes.error;
 
-  // Resolve past wind, preferring real measurements over model output:
-  //   1. the explicitly configured SMHI station, if it has fresh data
-  //   2. the nearest active SMHI wind station, if it has fresh data
-  //   3. Open-Meteo model history (clearly labelled as modelled in the UI)
   const isUsable = (h: SmhiObsHistory | null) => !isEmptyHistory(h) && !isStaleHistory(h);
 
-  let history: SmhiObsHistory | null = smhiHistory;
-  let historyIsModelled = false;
-  let obsStation: ObsStationRef | null = null;
-
-  // Attribute even the explicitly configured station, so the UI can always
-  // name the source of measured history rather than only for auto-resolved ones.
-  if (isUsable(history) && smhiObsId && lat && lon) {
-    obsStation = await getObsStationInfo(Number(smhiObsId), Number(lat), Number(lon));
-  }
-
-  if (!isUsable(history) && lat && lon) {
-    const nearest = await findNearestObsStation(Number(lat), Number(lon));
-    // Skip if it resolves to the station we already tried and found unusable.
-    if (nearest && nearest.id !== Number(smhiObsId)) {
-      const nearestHistory = await fetchSmhiHistory(nearest.id);
-      if (isUsable(nearestHistory)) {
-        history = nearestHistory;
-        obsStation = nearest;
-      }
-    }
-  }
-
-  if (!isUsable(history) && lat && lon) {
-    const om = await fetchOpenMeteoHistory(Number(lat), Number(lon));
-    if (om.history) {
-      history = om.history;
-      historyIsModelled = true;
-    }
-    if (om.error) diag.history = om.error;
-  }
-
-  // Resolve the live reading, preferring real measurements over forecast:
+  // Resolve the live reading first, preferring real measurements over forecast:
   //   1. the spot's own VIVA station (freshest — updates every 5–15 min)
   //   2. the nearest VIVA station that actually reports wind
-  //   3. the latest point of the measured history resolved above
+  //   3. (after history resolves below) the newest measured history point
   //   4. nothing — the client then derives a reading from the forecast
+  // Track which VIVA station supplied the wind: it is also the preferred
+  // history source, since VIVA serves 24h series at 10-minute resolution.
   let currentStation: { name: string; distanceKm: number } | null = null;
+  let liveVivaId: number | null = current?.hasWind && vivaId ? Number(vivaId) : null;
 
   if (!current?.hasWind && lat && lon) {
     const candidates = (await findNearestVivaStations(Number(lat), Number(lon), 5)).filter(
@@ -118,7 +92,58 @@ export async function GET(req: NextRequest) {
         airTemp: current?.airTemp ?? obs.airTemp,
       };
       currentStation = { name: candidates[hit].name, distanceKm: candidates[hit].distanceKm };
+      liveVivaId = candidates[hit].id;
     }
+  }
+
+  // Resolve past wind, preferring real measurements over model output:
+  //   1. VIVA history from the station supplying the live wind (10-min resolution)
+  //   2. the explicitly configured SMHI station, if it has fresh data (hourly)
+  //   3. the nearest active SMHI wind station, if it has fresh data
+  //   4. Open-Meteo model history (clearly labelled as modelled in the UI)
+  let history: SmhiObsHistory | null = null;
+  let historyIsModelled = false;
+  let obsStation: (ObsStationRef & { provider: 'viva' | 'smhi' }) | null = null;
+
+  if (liveVivaId != null) {
+    const vh = await fetchVivaHistory(liveVivaId);
+    if (isUsable(vh)) {
+      history = vh;
+      if (lat && lon) {
+        const info = await getVivaStationInfo(liveVivaId, Number(lat), Number(lon));
+        if (info) obsStation = { ...info, provider: 'viva' };
+      }
+    }
+  }
+
+  if (!isUsable(history) && isUsable(smhiHistory)) {
+    history = smhiHistory;
+    if (smhiObsId && lat && lon) {
+      const info = await getObsStationInfo(Number(smhiObsId), Number(lat), Number(lon));
+      if (info) obsStation = { ...info, provider: 'smhi' };
+    }
+  }
+
+  if (!isUsable(history) && lat && lon) {
+    const nearest = await findNearestObsStation(Number(lat), Number(lon));
+    // Skip if it resolves to the station we already tried and found unusable.
+    if (nearest && nearest.id !== Number(smhiObsId)) {
+      const nearestHistory = await fetchSmhiHistory(nearest.id);
+      if (isUsable(nearestHistory)) {
+        history = nearestHistory;
+        obsStation = { ...nearest, provider: 'smhi' };
+      }
+    }
+  }
+
+  if (!isUsable(history) && lat && lon) {
+    const om = await fetchOpenMeteoHistory(Number(lat), Number(lon));
+    if (om.history) {
+      history = om.history;
+      historyIsModelled = true;
+      obsStation = null;
+    }
+    if (om.error) diag.history = om.error;
   }
 
   // Still no live wind, but the chart is backed by real measurements? Use their

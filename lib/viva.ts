@@ -1,7 +1,9 @@
 import { haversineKm, STATION_MAX_KM } from './geo';
 import { VIVA_STATIONS_SNAPSHOT } from './viva-stations.snapshot';
+import type { SmhiObsHistory, SmhiObsPoint } from './smhi';
 
-const VIVA_BASE = 'https://services.viva.sjofartsverket.se:8080/output/vivaoutputservice.svc/vivastation';
+const VIVA_SVC = 'https://services.viva.sjofartsverket.se:8080/output/vivaoutputservice.svc';
+const VIVA_BASE = `${VIVA_SVC}/vivastation`;
 
 interface VivaSample {
   Name: string;
@@ -79,6 +81,91 @@ async function fetchVivaRoster(): Promise<
   } catch {
     return [];
   }
+}
+
+/**
+ * VIVA history timestamps are Swedish wall-clock time ("YYYY-MM-DD HH:MM:SS",
+ * no timezone marker), while the server runs in UTC — parse them via the
+ * Europe/Stockholm offset or every point lands 1–2h off. Offset is memoized
+ * per hour; only a DST-transition night can make it vary within one series.
+ */
+const tzOffsetCache = new Map<number, number>();
+function stockholmOffsetMs(atEpoch: number): number {
+  const hourKey = Math.floor(atEpoch / 3_600_000);
+  const cached = tzOffsetCache.get(hourKey);
+  if (cached !== undefined) return cached;
+  const part = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Stockholm',
+    timeZoneName: 'longOffset',
+  })
+    .formatToParts(atEpoch)
+    .find((p) => p.type === 'timeZoneName')?.value;
+  const m = part?.match(/GMT([+-])(\d{2}):(\d{2})/);
+  const offset = m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) * 60_000 : 0;
+  tzOffsetCache.set(hourKey, offset);
+  return offset;
+}
+
+function parseVivaTime(s: string): number {
+  const asUtc = Date.parse(s.replace(' ', 'T') + 'Z');
+  if (isNaN(asUtc)) return NaN;
+  return asUtc - stockholmOffsetMs(asUtc);
+}
+
+interface VivaHistoryEntry {
+  Value: string;
+  Time: string;
+}
+
+async function fetchVivaHistoryParam(param: string, id: number): Promise<SmhiObsPoint[]> {
+  try {
+    const res = await fetch(`${VIVA_SVC}/ViVaStationHistory/${param}/${id}?isMVY=false`, {
+      next: { revalidate: 600 },
+      signal: AbortSignal.timeout(8000),
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const list: VivaHistoryEntry[] = data?.GetHistoryResult?.StationHistory ?? [];
+    return list
+      .map((e) => ({ time: parseVivaTime(e.Time), value: parseFloat(e.Value) }))
+      .filter((p) => !isNaN(p.time) && !isNaN(p.value))
+      .sort((a, b) => a.time - b.time);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 24h of measured history from a VIVA station: 144 samples at 10-minute
+ * resolution per parameter — six times denser than SMHI's hourly obs.
+ * Unlike the snapshot's "V 9.1" format, history values are plain numbers;
+ * direction comes as its own series in degrees. Empty arrays for parameters
+ * the station doesn't carry — callers judge usability, same as SMHI history.
+ */
+export async function fetchVivaHistory(id: number): Promise<SmhiObsHistory> {
+  const [windSpeed, gust, windDir] = await Promise.all([
+    fetchVivaHistoryParam('Medelvind', id),
+    fetchVivaHistoryParam('Byvind', id),
+    fetchVivaHistoryParam('Vindriktning', id),
+  ]);
+  return { windSpeed, windDir, gust };
+}
+
+/**
+ * Name + distance for a known VIVA station id, for source attribution in the
+ * UI. Roster is live-first with the committed snapshot as fallback.
+ */
+export async function getVivaStationInfo(
+  id: number,
+  lat: number,
+  lon: number
+): Promise<VivaStationRef | null> {
+  const live = await fetchVivaRoster();
+  const roster = live.length > 0 ? live : VIVA_STATIONS_SNAPSHOT;
+  const s = roster.find((x) => x.id === id);
+  if (!s) return null;
+  return { id, name: s.name, distanceKm: haversineKm(lat, lon, s.lat, s.lon) };
 }
 
 /**

@@ -20,8 +20,8 @@ interface FetchedData {
   daylight: DaylightInfo | null;
   /** True when history came from Open-Meteo model rather than SMHI measured obs */
   historyIsModelled?: boolean;
-  /** Set when past wind came from an auto-resolved nearby SMHI station */
-  obsStation?: { id: number; name: string; distanceKm: number } | null;
+  /** Source of measured past wind: which provider/station and how far away */
+  obsStation?: { id: number; name: string; distanceKm: number; provider?: 'viva' | 'smhi' } | null;
   /** Set when the live reading came from a nearby station rather than this spot's own */
   currentStation?: { name: string; distanceKm: number } | null;
   /** Per-source failure reasons from the API (e.g. { forecast: 'timeout after 8000ms' }) */
