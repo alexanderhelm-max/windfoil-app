@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   MapContainer,
   TileLayer,
@@ -40,6 +40,31 @@ interface WindMapProps {
 }
 
 const VIVA_LAYER_KEY = 'windfoil:map:viva:v1';
+const SMHI_LAYER_KEY = 'windfoil:map:smhi:v1';
+
+interface LiveWind {
+  avg: number;
+  dir: number | null;
+}
+
+interface SmhiMapStation {
+  id: number;
+  name: string;
+  lat: number;
+  lon: number;
+  avg: number | null;
+  dir: number | null;
+}
+
+/**
+ * Colour for a station dot. Direction shifts the thresholds by 1 m/s when the
+ * wind is off-sector, so where a station reports no direction we evaluate at a
+ * mid-sector bearing — that grades on speed alone rather than guessing badly.
+ */
+function dotColor(avg: number | null, dir: number | null): string {
+  if (avg == null) return '#475569';
+  return conditionColors[getCondition(avg, dir ?? 250)];
+}
 
 /** Arrow points where the wind is going, so heading (wind FROM) + 180°. */
 function arrowSvg(heading: number, size: number, color: string): string {
@@ -96,6 +121,34 @@ function ZoomWatcher({ onZoom }: { onZoom: (z: number) => void }) {
   useEffect(() => {
     onZoom(map.getZoom());
   }, [map, onZoom]);
+  return null;
+}
+
+/**
+ * Reports which VIVA stations are on screen, debounced.
+ *
+ * VIVA has no bulk endpoint, so live wind costs one upstream request per
+ * station — only the ones actually in view are worth asking for, and the
+ * server caps the list besides.
+ */
+function ViewportWatcher({ onView }: { onView: (b: L.LatLngBounds) => void }) {
+  const timer = useRef<number | null>(null);
+  const map = useMapEvents({
+    moveend: () => schedule(),
+    zoomend: () => schedule(),
+  });
+
+  function schedule() {
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => onView(map.getBounds()), 500);
+  }
+
+  useEffect(() => {
+    onView(map.getBounds());
+    return () => {
+      if (timer.current) window.clearTimeout(timer.current);
+    };
+  }, [map, onView]);
   return null;
 }
 
@@ -195,16 +248,29 @@ export default function WindMap({
   existingIds,
 }: WindMapProps) {
   const [showViva, setShowViva] = useState(true);
+  const [showSmhi, setShowSmhi] = useState(false);
   const [zoom, setZoom] = useState(9);
   const [pendingViva, setPendingViva] = useState<VivaSnapshotStation | null>(null);
+  const [pendingSmhi, setPendingSmhi] = useState<SmhiMapStation | null>(null);
+  const [smhiStations, setSmhiStations] = useState<SmhiMapStation[]>([]);
+  const [liveViva, setLiveViva] = useState<Record<number, LiveWind>>({});
+  const requestedRef = useRef<string>('');
 
   useEffect(() => {
     if (localStorage.getItem(VIVA_LAYER_KEY) === 'off') setShowViva(false);
+    if (localStorage.getItem(SMHI_LAYER_KEY) === 'on') setShowSmhi(true);
   }, []);
 
   function toggleViva() {
     setShowViva((v) => {
       localStorage.setItem(VIVA_LAYER_KEY, v ? 'off' : 'on');
+      return !v;
+    });
+  }
+
+  function toggleSmhi() {
+    setShowSmhi((v) => {
+      localStorage.setItem(SMHI_LAYER_KEY, v ? 'off' : 'on');
       return !v;
     });
   }
@@ -223,6 +289,57 @@ export default function WindMap({
   );
 
   const selected = entries.find((e) => e.station.id === selectedStationId) ?? null;
+
+  // One request serves both layers: SMHI comes back whole (its bulk endpoint
+  // is a single upstream call) while VIVA is limited to what's on screen.
+  const loadLive = useCallback(
+    async (bounds: L.LatLngBounds) => {
+      const inView = VIVA_STATIONS_SNAPSHOT.filter((v) =>
+        bounds.contains([v.lat, v.lon] as L.LatLngTuple)
+      ).slice(0, 40);
+      const ids = inView.map((v) => v.id).sort((a, b) => a - b);
+      const key = ids.join(',');
+      // Panning within the same set of stations shouldn't refetch.
+      if (key === requestedRef.current) return;
+      requestedRef.current = key;
+      try {
+        const res = await fetch(`/api/map-stations?viva=${key}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          smhi: SmhiMapStation[];
+          viva: { id: number; avg: number; dir: number }[];
+        };
+        setSmhiStations(data.smhi ?? []);
+        setLiveViva((prev) => {
+          const next = { ...prev };
+          for (const v of data.viva ?? []) next[v.id] = { avg: v.avg, dir: v.dir };
+          return next;
+        });
+      } catch {
+        // Live colours are a nicety — dots stay grey and remain addable.
+      }
+    },
+    []
+  );
+
+  const availableSmhi = useMemo(
+    () => smhiStations.filter((s) => !existingIds.has(`smhi-${s.id}`)),
+    [smhiStations, existingIds]
+  );
+
+  function addSmhiStation(s: SmhiMapStation) {
+    onAddStation({
+      id: `smhi-${s.id}`,
+      name: s.name,
+      description: 'SMHI station',
+      vivaId: null,
+      smhiObsId: s.id,
+      holfuyId: null,
+      lat: s.lat,
+      lon: s.lon,
+    });
+    setPendingSmhi(null);
+  }
 
   function addVivaStation(v: VivaSnapshotStation) {
     onAddStation({
@@ -246,6 +363,13 @@ export default function WindMap({
         scrollWheelZoom
         preferCanvas
         zoomControl={false}
+        // Continuous zoom rather than Leaflet's default integer steps: the
+        // wheel and pinch glide, and the +/- buttons move half a level at a
+        // time instead of jumping.
+        zoomSnap={0}
+        zoomDelta={0.5}
+        wheelPxPerZoomLevel={140}
+        zoomAnimation
         style={{ height: '68vh', minHeight: 420, background: '#0f172a' }}
       >
         <TileLayer
@@ -257,28 +381,59 @@ export default function WindMap({
             thumb on a phone, and clear of the layer toggle. */}
         <ZoomControl position="bottomright" />
         <ZoomWatcher onZoom={setZoom} />
+        <ViewportWatcher onView={loadLive} />
         <FitBounds entries={entries} />
 
+        {showSmhi &&
+          availableSmhi.map((s) => {
+            const color = dotColor(s.avg, s.dir);
+            return (
+              <CircleMarker
+                key={`smhi-${s.id}`}
+                center={[s.lat, s.lon]}
+                radius={s.avg == null ? 3 : 4.5}
+                pathOptions={{
+                  color,
+                  weight: 1,
+                  opacity: s.avg == null ? 0.4 : 0.9,
+                  fillColor: color,
+                  fillOpacity: s.avg == null ? 0.3 : 0.65,
+                }}
+                eventHandlers={{ click: () => setPendingSmhi(s) }}
+              >
+                <Tooltip direction="top" offset={[0, -4]}>
+                  {s.name}
+                  {s.avg != null && ` · ${s.avg.toFixed(1)} m/s`}
+                </Tooltip>
+              </CircleMarker>
+            );
+          })}
+
         {showViva &&
-          availableViva.map((v) => (
-            <CircleMarker
-              key={v.id}
-              center={[v.lat, v.lon]}
-              radius={4}
-              pathOptions={{
-                color: '#94a3b8',
-                weight: 1,
-                opacity: 0.55,
-                fillColor: '#475569',
-                fillOpacity: 0.75,
-              }}
-              eventHandlers={{ click: () => setPendingViva(v) }}
-            >
-              <Tooltip direction="top" offset={[0, -4]}>
-                {v.name}
-              </Tooltip>
-            </CircleMarker>
-          ))}
+          availableViva.map((v) => {
+            const live = liveViva[v.id];
+            const color = dotColor(live?.avg ?? null, live?.dir ?? null);
+            return (
+              <CircleMarker
+                key={v.id}
+                center={[v.lat, v.lon]}
+                radius={live ? 5 : 3.5}
+                pathOptions={{
+                  color,
+                  weight: live ? 1.5 : 1,
+                  opacity: live ? 0.95 : 0.5,
+                  fillColor: color,
+                  fillOpacity: live ? 0.7 : 0.35,
+                }}
+                eventHandlers={{ click: () => setPendingViva(v) }}
+              >
+                <Tooltip direction="top" offset={[0, -4]}>
+                  {v.name}
+                  {live && ` · ${live.avg.toFixed(1)} m/s`}
+                </Tooltip>
+              </CircleMarker>
+            );
+          })}
 
         <SpotMarkers
           entries={entries}
@@ -291,13 +446,30 @@ export default function WindMap({
         />
       </MapContainer>
 
-      <button
-        onClick={toggleViva}
-        className="absolute top-3 right-3 z-[1000] px-3 py-2 rounded-lg text-xs font-medium border shadow-lg transition bg-slate-800/95 border-slate-600 text-slate-300 hover:text-white hover:bg-slate-700"
-        title="Faint dots are VIVA stations — tap one to add it as a spot"
-      >
-        {showViva ? '●' : '○'} {availableViva.length} stations
-      </button>
+      <div className="absolute top-3 right-3 z-[1000] flex flex-col gap-1.5 items-end">
+        <button
+          onClick={toggleViva}
+          className={`px-3 py-1.5 rounded-lg text-xs font-medium border shadow-lg transition ${
+            showViva
+              ? 'bg-slate-800/95 border-slate-500 text-slate-100'
+              : 'bg-slate-800/80 border-slate-700 text-slate-500 hover:text-slate-300'
+          }`}
+          title="VIVA stations — tap a dot to add it as a spot"
+        >
+          {showViva ? '●' : '○'} VIVA {availableViva.length}
+        </button>
+        <button
+          onClick={toggleSmhi}
+          className={`px-3 py-1.5 rounded-lg text-xs font-medium border shadow-lg transition ${
+            showSmhi
+              ? 'bg-slate-800/95 border-slate-500 text-slate-100'
+              : 'bg-slate-800/80 border-slate-700 text-slate-500 hover:text-slate-300'
+          }`}
+          title="SMHI weather stations — tap a dot to add it as a spot"
+        >
+          {showSmhi ? '●' : '○'} SMHI {availableSmhi.length || ''}
+        </button>
+      </div>
 
       {/* Info card — one panel for both a picked spot and a candidate station,
           so tapping anything on the map always answers in the same place. */}
@@ -308,19 +480,73 @@ export default function WindMap({
       )}
       {!selected && pendingViva && (
         <InfoCard onClose={() => setPendingViva(null)}>
-          <div className="font-semibold text-white text-base">{pendingViva.name}</div>
-          <div className="text-xs text-slate-400 mt-0.5 mb-3">
-            VIVA station #{pendingViva.id} · not in your list
-          </div>
-          <button
-            onClick={() => addVivaStation(pendingViva)}
-            className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg transition"
-          >
-            + Add as spot
-          </button>
+          <StationCandidate
+            name={pendingViva.name}
+            subtitle={`VIVA station #${pendingViva.id}`}
+            avg={liveViva[pendingViva.id]?.avg ?? null}
+            dir={liveViva[pendingViva.id]?.dir ?? null}
+            onAdd={() => addVivaStation(pendingViva)}
+          />
+        </InfoCard>
+      )}
+      {!selected && !pendingViva && pendingSmhi && (
+        <InfoCard onClose={() => setPendingSmhi(null)}>
+          <StationCandidate
+            name={pendingSmhi.name}
+            subtitle={`SMHI station #${pendingSmhi.id}`}
+            avg={pendingSmhi.avg}
+            dir={pendingSmhi.dir}
+            onAdd={() => addSmhiStation(pendingSmhi)}
+          />
         </InfoCard>
       )}
     </div>
+  );
+}
+
+/** A station on the map that isn't in the user's list yet. */
+function StationCandidate({
+  name,
+  subtitle,
+  avg,
+  dir,
+  onAdd,
+}: {
+  name: string;
+  subtitle: string;
+  avg: number | null;
+  dir: number | null;
+  onAdd: () => void;
+}) {
+  return (
+    <>
+      <div className="font-semibold text-white text-base pr-6">{name}</div>
+      <div className="text-xs text-slate-400 mt-0.5 mb-3">{subtitle} · not in your list</div>
+      {avg != null ? (
+        <div className="flex items-baseline gap-2 mb-3">
+          <span
+            className="text-2xl font-bold tabular-nums"
+            style={{ color: dotColor(avg, dir) }}
+          >
+            {avg.toFixed(1)}
+          </span>
+          <span className="text-sm text-slate-400">m/s</span>
+          {dir != null && (
+            <span className="text-xs text-slate-500 ml-auto">
+              {headingToCompass(dir)} {Math.round(dir)}°
+            </span>
+          )}
+        </div>
+      ) : (
+        <div className="text-xs text-slate-500 mb-3">No recent wind reading</div>
+      )}
+      <button
+        onClick={onAdd}
+        className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg transition"
+      >
+        + Add as spot
+      </button>
+    </>
   );
 }
 
