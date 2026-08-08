@@ -5,11 +5,9 @@ import { SmhiObsHistory, DaylightInfo } from '@/lib/smhi';
 import {
   getCondition,
   getGustLevel,
-  getHourTrend,
   headingToCompass,
   conditionColors,
   conditionLabels,
-  trendIcons,
   getWetsuitHint,
   getWingHint,
   ConditionLevel,
@@ -17,6 +15,7 @@ import {
 } from '@/lib/wind-utils';
 import { formatStationMessage, getAppUrl } from '@/lib/share';
 import ShareMenu from './ShareMenu';
+import TrendBadge, { Trend } from './TrendBadge';
 
 interface StationCardProps {
   id: string;
@@ -24,7 +23,8 @@ interface StationCardProps {
   description: string;
   current: VivaObservation | null;
   history: SmhiObsHistory | null;
-  recentObs: { time: number; wind: number }[];
+  /** Last-hour wind trend, or null when there isn't enough data to read one */
+  trend: Trend | null;
   isSelected: boolean;
   onClick: () => void;
   onRemove?: (id: string) => void;
@@ -75,7 +75,7 @@ export default function StationCard({
   name,
   description,
   current,
-  recentObs,
+  trend,
   isSelected,
   onClick,
   onRemove,
@@ -90,9 +90,6 @@ export default function StationCard({
 
   const condition: ConditionLevel = getCondition(avgWind, heading);
   const gustLevel: GustLevel = getGustLevel(avgWind, gust);
-  // Null when the last hour is too thin to read a trend from — the arrow is
-  // simply omitted rather than shown as a confident "steady".
-  const trendDetail = getHourTrend(recentObs);
   const compassDir = headingToCompass(heading);
   const condColor = conditionColors[condition];
   const wetsuit = getWetsuitHint(current?.waterTemp);
@@ -181,29 +178,9 @@ export default function StationCard({
               {gust.toFixed(1)}
             </span>
             <span className="text-slate-400 text-sm">gust</span>
-            {trendDetail && (
-              <span
-                className={`ml-1 text-sm font-semibold ${
-                  trendDetail.direction === 'building'
-                    ? 'text-green-400'
-                    : trendDetail.direction === 'dropping'
-                    ? 'text-orange-400'
-                    : 'text-slate-400'
-                }`}
-                title={`Last hour: ${trendDetail.direction} (${trendDetail.ratePerHour.toFixed(
-                  1
-                )} m/s per hour)`}
-              >
-                {trendIcons[trendDetail.direction]}
-                {trendDetail.direction !== 'steady' && (
-                  <span className="ml-0.5 tabular-nums">
-                    {trendDetail.ratePerHour > 0 ? '+' : ''}
-                    {trendDetail.ratePerHour.toFixed(1)}/h
-                  </span>
-                )}
-                <span className="ml-1 text-[10px] font-normal text-slate-500">1h</span>
-              </span>
-            )}
+            <span className="ml-1 text-sm">
+              <TrendBadge trend={trend} />
+            </span>
           </div>
 
           {/* Direction */}

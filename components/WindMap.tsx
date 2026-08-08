@@ -16,6 +16,7 @@ import 'leaflet/dist/leaflet.css';
 import { VivaObservation } from '@/lib/viva';
 import { Station } from '@/lib/stations';
 import { VIVA_STATIONS_SNAPSHOT, VivaSnapshotStation } from '@/lib/viva-stations.snapshot';
+import TrendBadge, { Trend } from './TrendBadge';
 import {
   getCondition,
   conditionColors,
@@ -28,6 +29,7 @@ export interface MapEntry {
   current: VivaObservation | null;
   windIsForecast: boolean;
   currentStation: { name: string; distanceKm: number } | null;
+  trend: Trend | null;
 }
 
 interface WindMapProps {
@@ -671,11 +673,17 @@ function SpotDetails({ entry, onOpenTimeline }: { entry: MapEntry; onOpenTimelin
         <div className="text-slate-400 text-sm mb-3">No data</div>
       )}
 
-      {condition && (
-        <div className="text-xs mb-3" style={{ color: conditionColors[condition] }}>
-          {conditionLabels[condition]}
-        </div>
-      )}
+      <div className="flex items-center gap-2 mb-3 text-xs">
+        {condition && (
+          <span style={{ color: conditionColors[condition] }}>{conditionLabels[condition]}</span>
+        )}
+        {entry.trend && (
+          <>
+            <span className="text-slate-600">·</span>
+            <TrendBadge trend={entry.trend} />
+          </>
+        )}
+      </div>
 
       <button
         onClick={onOpenTimeline}

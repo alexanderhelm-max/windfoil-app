@@ -9,7 +9,7 @@ import AlertBanner from './AlertBanner';
 import AddStationDialog from './AddStationDialog';
 import { VivaObservation } from '@/lib/viva';
 import { SmhiObsHistory, ForecastPoint, DaylightInfo, ForecastSource } from '@/lib/smhi';
-import { getCondition } from '@/lib/wind-utils';
+import { getCondition, getHourTrend } from '@/lib/wind-utils';
 import { Station, DEFAULT_STATIONS } from '@/lib/stations';
 import { loadStations, saveStations, resetStations } from '@/lib/station-store';
 import { buildShareSpotsUrl, decodeStationsFromParam, copyToClipboard } from '@/lib/share';
@@ -302,7 +302,9 @@ export default function Dashboard() {
       forecastSmhi: d?.forecastSmhi ?? [],
       forecast: d?.forecast ?? [],
       daylight: d?.daylight ?? null,
-      recentObs,
+      // Computed once here and handed to the card, the ranking and the map,
+      // so all three describe the same hour the same way.
+      trend: getHourTrend(recentObs),
       airTempIsForecast,
       windIsForecast,
     };
@@ -327,6 +329,7 @@ export default function Dashboard() {
     stationName: e.station.name,
     current: e.current,
     forecast: e.forecast,
+    trend: e.trend,
   }));
 
   // Surface forecast status:
@@ -440,6 +443,7 @@ export default function Dashboard() {
             current: e.current,
             windIsForecast: e.windIsForecast,
             currentStation: e.currentStation,
+            trend: e.trend,
           }))}
           selectedStationId={selectedStationId}
           onSelect={handleMapSelect}
@@ -502,7 +506,7 @@ export default function Dashboard() {
                 description={e.station.description}
                 current={e.current}
                 history={e.history}
-                recentObs={e.recentObs}
+                trend={e.trend}
                 isSelected={selectedStationId === e.station.id}
                 onClick={() => handleSelectStation(e.station.id)}
                 onRemove={handleRemove}
