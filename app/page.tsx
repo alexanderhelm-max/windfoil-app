@@ -43,7 +43,15 @@ export default function Page() {
       </main>
 
       <footer className="border-t border-slate-800 mt-8 py-4 text-center text-slate-600 text-xs">
-        Data: SMHI Open Data · VIVA Sjöfartsverket · Updates every 15 min
+        Data: SMHI Open Data · VIVA Sjöfartsverket · Updates every 15 min ·{' '}
+        <a
+          href="https://github.com/alexanderhelm-max/windfoil-app/issues/new"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-slate-500 hover:text-slate-300 underline"
+        >
+          💬 Feedback
+        </a>
       </footer>
     </div>
   );

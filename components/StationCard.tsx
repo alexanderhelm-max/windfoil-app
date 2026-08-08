@@ -5,11 +5,9 @@ import { SmhiObsHistory, DaylightInfo } from '@/lib/smhi';
 import {
   getCondition,
   getGustLevel,
-  getTrendDetail,
   headingToCompass,
   conditionColors,
   conditionLabels,
-  trendIcons,
   getWetsuitHint,
   getWingHint,
   ConditionLevel,
@@ -17,6 +15,7 @@ import {
 } from '@/lib/wind-utils';
 import { formatStationMessage, getAppUrl } from '@/lib/share';
 import ShareMenu from './ShareMenu';
+import TrendBadge, { Trend } from './TrendBadge';
 
 interface StationCardProps {
   id: string;
@@ -24,7 +23,8 @@ interface StationCardProps {
   description: string;
   current: VivaObservation | null;
   history: SmhiObsHistory | null;
-  recentObs: { time: number; wind: number }[];
+  /** Last-hour wind trend, or null when there isn't enough data to read one */
+  trend: Trend | null;
   isSelected: boolean;
   onClick: () => void;
   onRemove?: (id: string) => void;
@@ -75,7 +75,7 @@ export default function StationCard({
   name,
   description,
   current,
-  recentObs,
+  trend,
   isSelected,
   onClick,
   onRemove,
@@ -90,9 +90,6 @@ export default function StationCard({
 
   const condition: ConditionLevel = getCondition(avgWind, heading);
   const gustLevel: GustLevel = getGustLevel(avgWind, gust);
-  const trendDetail = getTrendDetail(recentObs);
-  const trend = trendDetail.direction;
-  const trendRate = trendDetail.ratePerHour;
   const compassDir = headingToCompass(heading);
   const condColor = conditionColors[condition];
   const wetsuit = getWetsuitHint(current?.waterTemp);
@@ -181,23 +178,8 @@ export default function StationCard({
               {gust.toFixed(1)}
             </span>
             <span className="text-slate-400 text-sm">gust</span>
-            <span
-              className={`ml-1 text-sm font-semibold ${
-                trend === 'building'
-                  ? 'text-green-400'
-                  : trend === 'dropping'
-                  ? 'text-orange-400'
-                  : 'text-slate-400'
-              }`}
-              title={`Trend: ${trend} (${trendRate.toFixed(1)} m/s per hour)`}
-            >
-              {trendIcons[trend]}
-              {trend !== 'steady' && (
-                <span className="ml-0.5 tabular-nums">
-                  {trendRate > 0 ? '+' : ''}
-                  {trendRate.toFixed(1)}/h
-                </span>
-              )}
+            <span className="ml-1 text-sm">
+              <TrendBadge trend={trend} />
             </span>
           </div>
 
@@ -265,9 +247,17 @@ export default function StationCard({
               {currentStation && !windIsForecast && (
                 <span
                   className="text-emerald-500/80 mr-1.5"
-                  title={`Measured at ${currentStation.name}, ${currentStation.distanceKm.toFixed(0)} km away — no sensor at this spot.`}
+                  title={
+                    currentStation.distanceKm < 0.5
+                      ? `Measured at ${currentStation.name}, at this spot.`
+                      : `Measured at ${currentStation.name}, ${currentStation.distanceKm.toFixed(0)} km away — no sensor at this spot.`
+                  }
                 >
-                  via {currentStation.name} {currentStation.distanceKm.toFixed(0)} km ·
+                  via {currentStation.name}
+                  {currentStation.distanceKm >= 0.5
+                    ? ` ${currentStation.distanceKm.toFixed(0)} km`
+                    : ''}{' '}
+                  ·
                 </span>
               )}
               Updated {formatUpdated(current.updatedAt)}

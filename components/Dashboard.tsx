@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import StationCard from './StationCard';
 import WindTimeline from './WindTimeline';
 import GoWindow from './GoWindow';
@@ -8,9 +9,22 @@ import AlertBanner from './AlertBanner';
 import AddStationDialog from './AddStationDialog';
 import { VivaObservation } from '@/lib/viva';
 import { SmhiObsHistory, ForecastPoint, DaylightInfo, ForecastSource } from '@/lib/smhi';
-import { getCondition } from '@/lib/wind-utils';
+import { getCondition, getHourTrend } from '@/lib/wind-utils';
 import { Station, DEFAULT_STATIONS } from '@/lib/stations';
 import { loadStations, saveStations, resetStations } from '@/lib/station-store';
+import { buildShareSpotsUrl, decodeStationsFromParam, copyToClipboard } from '@/lib/share';
+
+// Leaflet touches window at import time, so the map can only load client-side.
+const WindMap = dynamic(() => import('./WindMap'), {
+  ssr: false,
+  loading: () => (
+    <div className="rounded-xl border border-slate-700 bg-slate-800/50 mb-8 flex items-center justify-center text-slate-500 text-sm" style={{ height: '65vh', minHeight: 380 }}>
+      Loading map…
+    </div>
+  ),
+});
+
+const VIEW_KEY = 'windfoil:view:v1';
 
 interface FetchedData {
   current: VivaObservation | null;
@@ -42,6 +56,7 @@ function buildUrl(s: Station): string {
   const params = new URLSearchParams();
   if (s.vivaId != null) params.set('vivaId', String(s.vivaId));
   if (s.smhiObsId != null) params.set('smhiObsId', String(s.smhiObsId));
+  if (s.holfuyId != null) params.set('holfuyId', String(s.holfuyId));
   params.set('lat', String(s.lat));
   params.set('lon', String(s.lon));
   return `/api/station-data?${params.toString()}`;
@@ -55,13 +70,30 @@ export default function Dashboard() {
   const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null);
+  const [pendingImport, setPendingImport] = useState<Station[] | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
+  const [view, setView] = useState<'list' | 'map'>('list');
   const stationRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const skipScrollRef = useRef(false);
 
-  // Hydrate from localStorage
+  // Hydrate from localStorage, and pick up a shared station list from the
+  // URL (?spots=...) — offered as an import rather than applied silently.
   useEffect(() => {
-    setStations(loadStations());
+    const loaded = loadStations();
+    setStations(loaded);
     setHydrated(true);
+    if (localStorage.getItem(VIEW_KEY) === 'map') setView('map');
+
+    const param = new URLSearchParams(window.location.search).get('spots');
+    if (param) {
+      const shared = decodeStationsFromParam(param);
+      const existing = new Set(loaded.map((s) => s.id));
+      const fresh = shared?.filter((s) => !existing.has(s.id)) ?? [];
+      if (fresh.length > 0) setPendingImport(fresh);
+      // Strip the param so reloads and copied URLs don't re-trigger the offer.
+      window.history.replaceState(null, '', window.location.pathname);
+    }
   }, []);
 
   // Fetch data when stations change, refresh every 15 minutes,
@@ -144,6 +176,34 @@ export default function Dashboard() {
     setSelectedStationId(null);
   }, []);
 
+  const switchView = useCallback((next: 'list' | 'map') => {
+    setView(next);
+    localStorage.setItem(VIEW_KEY, next);
+  }, []);
+
+  const handleShareSpots = useCallback(async () => {
+    const url = buildShareSpotsUrl(stations);
+    // Native share sheet on mobile; clipboard on desktop.
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({ title: 'My windfoil spots', url });
+        return;
+      } catch {
+        // User cancelled the sheet — fall through to clipboard.
+      }
+    }
+    if (await copyToClipboard(url)) {
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2500);
+    }
+  }, [stations]);
+
+  const handleImportShared = useCallback(() => {
+    if (!pendingImport) return;
+    updateStations([...stations, ...pendingImport]);
+    setPendingImport(null);
+  }, [pendingImport, stations, updateStations]);
+
   const handleSelectStation = (stationId: string) => {
     if (selectedStationId === stationId) {
       setSelectedStationId(null);
@@ -157,11 +217,33 @@ export default function Dashboard() {
   // have to hunt for it.
   useEffect(() => {
     if (!selectedStationId) return;
+    // Selecting from the map only opens the marker popup; scrolling away from
+    // the map there would be jarring, so the popup's button scrolls instead.
+    if (skipScrollRef.current) {
+      skipScrollRef.current = false;
+      return;
+    }
     const id = window.setTimeout(() => {
       timelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 50);
     return () => window.clearTimeout(id);
   }, [selectedStationId]);
+
+  const handleMapSelect = useCallback((stationId: string) => {
+    skipScrollRef.current = true;
+    setSelectedStationId(stationId);
+  }, []);
+
+  const handleMapDeselect = useCallback(() => setSelectedStationId(null), []);
+
+  const handleOpenTimeline = useCallback((stationId: string) => {
+    skipScrollRef.current = false;
+    setSelectedStationId(stationId);
+    // Same id as already selected wouldn't re-run the effect above, so scroll here.
+    window.setTimeout(() => {
+      timelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  }, []);
 
   const handleSelectFromRanking = useCallback((stationId: string) => {
     setSelectedStationId(stationId);
@@ -170,8 +252,13 @@ export default function Dashboard() {
   // Build effectiveStations: synthesize current from forecast for stations with no live data
   const effectiveStations = stations.map((s) => {
     const d = data[s.id];
+    // A full hour of readings, so the card's trend is a real one-hour slope
+    // rather than whatever the last few samples happened to do.
+    const hourAgo = Date.now() - 3600_000;
     const recentObs =
-      d?.history?.windSpeed.slice(-3).map((p) => ({ time: p.time, wind: p.value })) ?? [];
+      d?.history?.windSpeed
+        .filter((p) => p.time >= hourAgo)
+        .map((p) => ({ time: p.time, wind: p.value })) ?? [];
     let current = d?.current ?? null;
     let airTempIsForecast = false;
     let windIsForecast = false;
@@ -215,7 +302,9 @@ export default function Dashboard() {
       forecastSmhi: d?.forecastSmhi ?? [],
       forecast: d?.forecast ?? [],
       daylight: d?.daylight ?? null,
-      recentObs,
+      // Computed once here and handed to the card, the ranking and the map,
+      // so all three describe the same hour the same way.
+      trend: getHourTrend(recentObs),
       airTempIsForecast,
       windIsForecast,
     };
@@ -240,6 +329,7 @@ export default function Dashboard() {
     stationName: e.station.name,
     current: e.current,
     forecast: e.forecast,
+    trend: e.trend,
   }));
 
   // Surface forecast status:
@@ -276,6 +366,20 @@ export default function Dashboard() {
       <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
         <div className="flex items-baseline gap-3 flex-wrap">
           <h2 className="text-xl font-bold text-slate-200">Stations</h2>
+          <div className="inline-flex rounded-lg bg-slate-900/60 p-0.5 border border-slate-700 self-center">
+            {(['list', 'map'] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => switchView(v)}
+                aria-pressed={view === v}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition capitalize ${
+                  view === v ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
           {lastRefreshAt && (
             <span className="text-xs text-slate-500 tabular-nums" title="Time of last data refresh">
               Last refresh {formatRefreshTime(lastRefreshAt)}
@@ -292,6 +396,13 @@ export default function Dashboard() {
             </button>
           )}
           <button
+            onClick={handleShareSpots}
+            className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium rounded-md transition"
+            title="Share your station list as a link — recipients get an import prompt."
+          >
+            {shareCopied ? 'Link copied!' : 'Share spots'}
+          </button>
+          <button
             onClick={() => setShowAdd(true)}
             className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-md transition"
           >
@@ -299,6 +410,49 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+
+      {pendingImport && (
+        <div className="bg-blue-900/30 border border-blue-700/60 rounded-xl px-4 py-3 mb-4 text-sm text-blue-200 flex items-center justify-between gap-3 flex-wrap">
+          <span>
+            <span className="font-semibold">Shared spots:</span>{' '}
+            {pendingImport.map((s) => s.name).join(', ')} — add to your list?
+          </span>
+          <span className="flex gap-2 shrink-0">
+            <button
+              onClick={handleImportShared}
+              className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-md transition"
+            >
+              Add {pendingImport.length === 1 ? 'it' : `all ${pendingImport.length}`}
+            </button>
+            <button
+              onClick={() => setPendingImport(null)}
+              className="px-3 py-1 text-blue-300 hover:text-white text-xs rounded-md transition"
+            >
+              Dismiss
+            </button>
+          </span>
+        </div>
+      )}
+
+      {/* In map view the map is the point of the page — it goes above the
+          banners and rankings, which stay available by scrolling. */}
+      {view === 'map' && (
+        <WindMap
+          entries={effectiveStations.map((e) => ({
+            station: e.station,
+            current: e.current,
+            windIsForecast: e.windIsForecast,
+            currentStation: e.currentStation,
+            trend: e.trend,
+          }))}
+          selectedStationId={selectedStationId}
+          onSelect={handleMapSelect}
+          onDeselect={handleMapDeselect}
+          onOpenTimeline={handleOpenTimeline}
+          onAddStation={handleAdd}
+          existingIds={existingIds}
+        />
+      )}
 
       {forecastOutage && (
         <div className="bg-amber-900/30 border border-amber-700/60 rounded-xl px-4 py-3 mb-4 text-sm text-amber-200">
@@ -325,7 +479,8 @@ export default function Dashboard() {
         </div>
       )}
 
-      {stations.length === 0 ? (
+      {view === 'list' &&
+        (stations.length === 0 ? (
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-8 text-center text-slate-400">
           <p className="mb-3">No stations yet.</p>
           <button
@@ -351,7 +506,7 @@ export default function Dashboard() {
                 description={e.station.description}
                 current={e.current}
                 history={e.history}
-                recentObs={e.recentObs}
+                trend={e.trend}
                 isSelected={selectedStationId === e.station.id}
                 onClick={() => handleSelectStation(e.station.id)}
                 onRemove={handleRemove}
@@ -363,13 +518,15 @@ export default function Dashboard() {
             </div>
           ))}
         </div>
-      )}
+        ))}
 
       <section ref={timelineRef} className="scroll-mt-20">
         <h2 className="text-xl font-bold text-slate-200 mb-2">Wind Timeline</h2>
         {!selectedEntry && (
           <p className="text-slate-500 text-sm mb-4">
-            Click a station card above to see its 24h history and 96h forecast.
+            {view === 'map'
+              ? 'Tap a spot on the map to see its 24h history and 96h forecast.'
+              : 'Click a station card above to see its 24h history and 96h forecast.'}
           </p>
         )}
         {selectedEntry && (

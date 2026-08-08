@@ -12,6 +12,7 @@ import {
 } from '@/lib/wind-utils';
 import { formatRankingMessage, getAppUrl } from '@/lib/share';
 import ShareMenu from './ShareMenu';
+import TrendBadge, { Trend } from './TrendBadge';
 import { pickRandomQuote } from '@/lib/quotes';
 import { useMemo } from 'react';
 
@@ -33,6 +34,8 @@ interface StationForecast {
   stationName: string;
   current: VivaObservation | null;
   forecast: ForecastPoint[];
+  /** Last-hour measured trend; only meaningful for the "right now" ranking */
+  trend: Trend | null;
 }
 
 interface GoWindowProps {
@@ -53,6 +56,9 @@ interface RankedStation {
   condition: ConditionLevel;
   gustRatio: number;
   durationHours: number;
+  /** Only set on the "right now" ranking — a past-hour trend would mislead
+   *  next to a forecast window that hasn't happened yet. */
+  trend?: Trend | null;
 }
 
 function formatWindowTime(d: Date): string {
@@ -205,6 +211,7 @@ function rankNow(stationForecasts: StationForecast[]): RankedStation[] {
         condition,
         gustRatio,
         durationHours: 0,
+        trend: sf.trend,
       };
     })
     .filter((s) => s.condition !== 'too-little');
@@ -307,6 +314,12 @@ function RankedList({
                     <span className="text-slate-500">
                       m/s {it.durationHours === 0 ? 'avg/gust' : 'avg/peak'}
                     </span>
+                    {it.trend && (
+                      <>
+                        <span className="text-slate-600">·</span>
+                        <TrendBadge trend={it.trend} compact />
+                      </>
+                    )}
                   </div>
                 </div>
                 {clickable && (

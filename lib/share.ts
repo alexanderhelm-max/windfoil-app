@@ -99,3 +99,76 @@ export function getAppUrl(): string {
   if (typeof window === 'undefined') return '';
   return window.location.origin;
 }
+
+// ---- Station-list sharing via URL ----------------------------------------
+// The list is encoded as a compact JSON tuple array in a base64url query
+// param, so sharing needs no backend: the recipient's browser decodes it and
+// offers an import. Tuple order: [id, name, description, vivaId, smhiObsId,
+// holfuyId, lat, lon].
+
+import type { Station } from './stations';
+
+type StationTuple = [
+  string,
+  string,
+  string,
+  number | null,
+  number | null,
+  number | null,
+  number,
+  number,
+];
+
+export function encodeStationsToParam(stations: Station[]): string {
+  const compact: StationTuple[] = stations.map((s) => [
+    s.id,
+    s.name,
+    s.description,
+    s.vivaId,
+    s.smhiObsId,
+    s.holfuyId ?? null,
+    s.lat,
+    s.lon,
+  ]);
+  const json = JSON.stringify(compact);
+  // btoa only handles latin-1; round-trip through UTF-8 bytes for å/ä/ö.
+  const b64 = btoa(String.fromCharCode(...new TextEncoder().encode(json)));
+  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+export function buildShareSpotsUrl(stations: Station[]): string {
+  return `${getAppUrl()}/?spots=${encodeStationsToParam(stations)}`;
+}
+
+/** Decode a shared station list. Returns null on any malformed input —
+ *  the param is user-controlled data from a URL, so everything is checked. */
+export function decodeStationsFromParam(param: string): Station[] | null {
+  try {
+    const b64 = param.replace(/-/g, '+').replace(/_/g, '/');
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    if (!Array.isArray(parsed)) return null;
+    const out: Station[] = [];
+    for (const t of parsed.slice(0, 50)) {
+      if (!Array.isArray(t) || t.length < 8) continue;
+      const [id, name, description, vivaId, smhiObsId, holfuyId, lat, lon] = t as unknown[];
+      if (typeof id !== 'string' || typeof name !== 'string') continue;
+      if (typeof lat !== 'number' || typeof lon !== 'number') continue;
+      if (lat < -90 || lat > 90 || lon < -180 || lon > 180) continue;
+      const num = (v: unknown): number | null => (typeof v === 'number' && isFinite(v) ? v : null);
+      out.push({
+        id: id.slice(0, 64),
+        name: name.slice(0, 64),
+        description: typeof description === 'string' ? description.slice(0, 128) : '',
+        vivaId: num(vivaId),
+        smhiObsId: num(smhiObsId),
+        holfuyId: num(holfuyId),
+        lat,
+        lon,
+      });
+    }
+    return out.length > 0 ? out : null;
+  } catch {
+    return null;
+  }
+}

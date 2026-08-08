@@ -22,20 +22,6 @@ export function getGustLevel(avg: number, gust: number): GustLevel {
   return 'gusty';
 }
 
-export function getTrend(observations: { time: number; wind: number }[]): TrendDirection {
-  if (observations.length < 2) return 'steady';
-  const recent = observations.slice(-3);
-  if (recent.length < 2) return 'steady';
-  const first = recent[0].wind;
-  const last = recent[recent.length - 1].wind;
-  const hoursDiff = (recent[recent.length - 1].time - recent[0].time) / 3600000;
-  if (hoursDiff === 0) return 'steady';
-  const rate = (last - first) / hoursDiff;
-  if (rate > 0.5) return 'building';
-  if (rate < -0.5) return 'dropping';
-  return 'steady';
-}
-
 export function headingToCompass(heading: number): string {
   const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
   return dirs[Math.round(heading / 22.5) % 16];
@@ -61,22 +47,44 @@ export const trendIcons: Record<TrendDirection, string> = {
   dropping: '↓',
 };
 
-/** Trend direction + rate (m/s per hour) — same data as getTrend, with magnitude. */
-export function getTrendDetail(
-  observations: { time: number; wind: number }[]
-): { direction: TrendDirection; ratePerHour: number } {
-  if (observations.length < 2) return { direction: 'steady', ratePerHour: 0 };
-  const recent = observations.slice(-3);
-  if (recent.length < 2) return { direction: 'steady', ratePerHour: 0 };
-  const first = recent[0].wind;
-  const last = recent[recent.length - 1].wind;
-  const hoursDiff = (recent[recent.length - 1].time - recent[0].time) / 3600000;
-  if (hoursDiff === 0) return { direction: 'steady', ratePerHour: 0 };
-  const rate = (last - first) / hoursDiff;
+/**
+ * Wind trend over the last hour, as m/s per hour.
+ *
+ * Fits a least-squares line through the readings in the window rather than
+ * differencing the last few samples: sources differ in density (VIVA reports
+ * every 10 minutes, SMHI hourly) and gusty readings make any two-point
+ * comparison jumpy. Returns null when the window is too thin or too short to
+ * describe a trend — better no arrow than a confident wrong one.
+ */
+export function getHourTrend(
+  observations: { time: number; wind: number }[],
+  windowMs = 3600_000
+): { direction: TrendDirection; ratePerHour: number } | null {
+  if (observations.length < 2) return null;
+  const newest = observations[observations.length - 1].time;
+  const pts = observations.filter((o) => newest - o.time <= windowMs);
+  if (pts.length < 2) return null;
+  const spanMs = pts[pts.length - 1].time - pts[0].time;
+  if (spanMs < 20 * 60_000) return null;
+
+  // Regress wind on hours-from-window-start.
+  const xs = pts.map((p) => (p.time - pts[0].time) / 3600_000);
+  const ys = pts.map((p) => p.wind);
+  const n = pts.length;
+  const mx = xs.reduce((a, b) => a + b, 0) / n;
+  const my = ys.reduce((a, b) => a + b, 0) / n;
+  let num = 0;
+  let den = 0;
+  for (let i = 0; i < n; i++) {
+    num += (xs[i] - mx) * (ys[i] - my);
+    den += (xs[i] - mx) ** 2;
+  }
+  if (den === 0) return null;
+  const ratePerHour = num / den;
   let direction: TrendDirection = 'steady';
-  if (rate > 0.5) direction = 'building';
-  else if (rate < -0.5) direction = 'dropping';
-  return { direction, ratePerHour: rate };
+  if (ratePerHour > 0.5) direction = 'building';
+  else if (ratePerHour < -0.5) direction = 'dropping';
+  return { direction, ratePerHour };
 }
 
 /** Wetsuit recommendation based on water temperature. Returns null if no temp known. */
