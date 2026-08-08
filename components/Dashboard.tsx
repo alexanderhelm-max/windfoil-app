@@ -22,8 +22,6 @@ interface FetchedData {
   historyIsModelled?: boolean;
   /** Source of measured past wind: which provider/station and how far away */
   obsStation?: { id: number; name: string; distanceKm: number; provider?: 'viva' | 'smhi' } | null;
-  /** Which forecast model produced the forecast points */
-  forecastSource?: 'open-meteo' | 'smhi' | null;
   /** Set when the live reading came from a nearby station rather than this spot's own */
   currentStation?: { name: string; distanceKm: number } | null;
   /** Per-source failure reasons from the API (e.g. { forecast: 'timeout after 8000ms' }) */

@@ -291,7 +291,7 @@ export default function WindTimeline({
             stroke="#3b82f6"
             strokeWidth={2}
             dot={false}
-            connectNulls={false}
+            connectNulls
             isAnimationActive={false}
           />
           {/* Observed gust */}
@@ -302,7 +302,7 @@ export default function WindTimeline({
             strokeWidth={1.5}
             strokeDasharray="4 2"
             dot={false}
-            connectNulls={false}
+            connectNulls
             isAnimationActive={false}
           />
           {/* Forecast avg */}
@@ -313,7 +313,7 @@ export default function WindTimeline({
             strokeWidth={2}
             strokeDasharray="6 3"
             dot={false}
-            connectNulls={false}
+            connectNulls
             isAnimationActive={false}
           />
           {/* Forecast gust */}
@@ -324,7 +324,7 @@ export default function WindTimeline({
             strokeWidth={1.5}
             strokeDasharray="2 2"
             dot={false}
-            connectNulls={false}
+            connectNulls
             isAnimationActive={false}
           />
         </ComposedChart>
