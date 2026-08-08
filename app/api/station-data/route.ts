@@ -6,6 +6,7 @@ import {
   fetchDaylight,
   fetchOpenMeteoHistory,
   findNearestObsStation,
+  getObsStationInfo,
   SmhiObsHistory,
   ObsStationRef,
 } from '@/lib/smhi';
@@ -62,6 +63,12 @@ export async function GET(req: NextRequest) {
   let history: SmhiObsHistory | null = smhiHistory;
   let historyIsModelled = false;
   let obsStation: ObsStationRef | null = null;
+
+  // Attribute even the explicitly configured station, so the UI can always
+  // name the source of measured history rather than only for auto-resolved ones.
+  if (isUsable(history) && smhiObsId && lat && lon) {
+    obsStation = await getObsStationInfo(Number(smhiObsId), Number(lat), Number(lon));
+  }
 
   if (!isUsable(history) && lat && lon) {
     const nearest = await findNearestObsStation(Number(lat), Number(lon));

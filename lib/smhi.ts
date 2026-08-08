@@ -67,17 +67,38 @@ interface SmhiStationRaw {
  * this one, and the roster changes as stations come and go. The list is cached
  * for a day — it rarely changes.
  */
+async function fetchObsRoster(): Promise<SmhiStationRaw[]> {
+  const { data } = await fetchJsonWithDiag(`${OBS_BASE}/parameter/4.json`, {
+    timeoutMs: 8000,
+    revalidate: 86400,
+  });
+  if (!data) return [];
+  return (data as { station?: SmhiStationRaw[] }).station ?? [];
+}
+
+/**
+ * Name + distance for a known SMHI station id, so the UI can attribute
+ * measured history to its source even when the station was configured
+ * explicitly rather than auto-resolved. Best-effort: null if the roster
+ * fetch fails or the id is unknown.
+ */
+export async function getObsStationInfo(
+  id: number,
+  lat: number,
+  lon: number
+): Promise<ObsStationRef | null> {
+  const stations = await fetchObsRoster();
+  const s = stations.find((st) => Number(st.key) === id);
+  if (!s || typeof s.latitude !== 'number' || typeof s.longitude !== 'number') return null;
+  return { id, name: s.name, distanceKm: haversineKm(lat, lon, s.latitude, s.longitude) };
+}
+
 export async function findNearestObsStation(
   lat: number,
   lon: number,
   maxKm = STATION_MAX_KM
 ): Promise<ObsStationRef | null> {
-  const { data } = await fetchJsonWithDiag(`${OBS_BASE}/parameter/4.json`, {
-    timeoutMs: 8000,
-    revalidate: 86400,
-  });
-  if (!data) return null;
-  const stations = (data as { station?: SmhiStationRaw[] }).station ?? [];
+  const stations = await fetchObsRoster();
   let best: ObsStationRef | null = null;
   for (const s of stations) {
     if (s.active === false) continue;

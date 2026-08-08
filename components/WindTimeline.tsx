@@ -172,7 +172,7 @@ export default function WindTimeline({
       <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
         <h3 className="text-lg font-semibold text-slate-200 flex items-center gap-2 flex-wrap">
           {stationName} — Wind Timeline
-          {historyIsModelled ? (
+          {!history || (history.windSpeed.length === 0 && history.gust.length === 0) ? null : historyIsModelled ? (
             <span
               className="text-xs font-normal px-2 py-0.5 rounded-full bg-slate-700 text-slate-400"
               title="Past wind shown is from Open-Meteo model — no measured station with fresh data nearby."
@@ -184,9 +184,16 @@ export default function WindTimeline({
               className="text-xs font-normal px-2 py-0.5 rounded-full bg-emerald-900/50 text-emerald-300"
               title={`Past wind measured at SMHI station ${obsStation.name}, ${obsStation.distanceKm.toFixed(0)} km away.`}
             >
-              measured · {obsStation.name} {obsStation.distanceKm.toFixed(0)} km
+              past: SMHI {obsStation.name} · {obsStation.distanceKm.toFixed(0)} km
             </span>
-          ) : null}
+          ) : (
+            <span
+              className="text-xs font-normal px-2 py-0.5 rounded-full bg-emerald-900/50 text-emerald-300"
+              title="Past wind measured at the SMHI station paired with this spot."
+            >
+              past: SMHI measured
+            </span>
+          )}
         </h3>
         <div className="inline-flex rounded-lg bg-slate-900/60 p-0.5 border border-slate-700">
           {(Object.keys(RANGES) as RangeKey[]).map((k) => {
