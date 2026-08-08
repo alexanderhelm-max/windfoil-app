@@ -92,21 +92,25 @@ export async function GET(req: NextRequest) {
   let currentStation: { name: string; distanceKm: number } | null = null;
 
   if (!current?.hasWind && lat && lon) {
-    const candidates = await findNearestVivaStations(Number(lat), Number(lon));
-    for (const c of candidates) {
-      if (c.id === Number(vivaId)) continue;
-      const obs = await fetchVivaStation(c.id);
-      if (obs?.hasWind) {
-        // Keep any sensor readings the spot's own station did provide —
-        // those are genuinely local — and only borrow the wind.
-        current = {
-          ...obs,
-          waterTemp: current?.waterTemp ?? obs.waterTemp,
-          airTemp: current?.airTemp ?? obs.airTemp,
-        };
-        currentStation = { name: c.name, distanceKm: c.distanceKm };
-        break;
-      }
+    const candidates = (await findNearestVivaStations(Number(lat), Number(lon), 5)).filter(
+      (c) => c.id !== Number(vivaId)
+    );
+    // Probe candidates together rather than in sequence: most VIVA stations
+    // carry only water level or temperature, so several misses before a hit is
+    // the normal case and doing it serially would stack up round-trips.
+    const observations = await Promise.all(candidates.map((c) => fetchVivaStation(c.id)));
+    // Candidates are distance-sorted, so the first hit is the closest with wind.
+    const hit = candidates.findIndex((_, i) => observations[i]?.hasWind);
+    if (hit !== -1) {
+      const obs = observations[hit] as VivaObservation;
+      // Keep any sensor readings the spot's own station did provide —
+      // those are genuinely local — and only borrow the wind.
+      current = {
+        ...obs,
+        waterTemp: current?.waterTemp ?? obs.waterTemp,
+        airTemp: current?.airTemp ?? obs.airTemp,
+      };
+      currentStation = { name: candidates[hit].name, distanceKm: candidates[hit].distanceKm };
     }
   }
 
