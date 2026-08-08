@@ -1,3 +1,5 @@
+import { haversineKm, STATION_MAX_KM } from './geo';
+
 const OBS_BASE = 'https://opendata-download-metobs.smhi.se/api/version/latest';
 // SMHI replaced pmp3g/v2 with snow1g/v1 on 2026-03-31. Nordic-only point forecast.
 const FCT_BASE = 'https://opendata-download-metfcst.smhi.se/api/category/snow1g/version/1/geotype/point';
@@ -43,9 +45,6 @@ export interface SmhiObsPoint {
   value: number;
 }
 
-/** How far away a measuring station may be before we stop calling it "this spot's" wind. */
-export const OBS_STATION_MAX_KM = 35;
-
 export interface ObsStationRef {
   id: number;
   name: string;
@@ -60,17 +59,6 @@ interface SmhiStationRaw {
   active?: boolean;
 }
 
-function haversineKm(aLat: number, aLon: number, bLat: number, bLon: number): number {
-  const R = 6371;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(bLat - aLat);
-  const dLon = toRad(bLon - aLon);
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
-
 /**
  * Find the closest active SMHI station that measures wind speed (parameter 4).
  *
@@ -82,7 +70,7 @@ function haversineKm(aLat: number, aLon: number, bLat: number, bLon: number): nu
 export async function findNearestObsStation(
   lat: number,
   lon: number,
-  maxKm = OBS_STATION_MAX_KM
+  maxKm = STATION_MAX_KM
 ): Promise<ObsStationRef | null> {
   const { data } = await fetchJsonWithDiag(`${OBS_BASE}/parameter/4.json`, {
     timeoutMs: 8000,

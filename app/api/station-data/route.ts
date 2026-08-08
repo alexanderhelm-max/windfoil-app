@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchVivaStation } from '@/lib/viva';
+import { fetchVivaStation, findNearestVivaStations, VivaObservation } from '@/lib/viva';
 import {
   fetchSmhiHistory,
   fetchSmhiForecast,
@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
   const lat = sp.get('lat');
   const lon = sp.get('lon');
 
-  const [current, smhiHistory, forecastRes, daylight] = await Promise.all([
+  const [vivaCurrent, smhiHistory, forecastRes, daylight] = await Promise.all([
     vivaId ? fetchVivaStation(Number(vivaId)) : Promise.resolve(null),
     smhiObsId ? fetchSmhiHistory(Number(smhiObsId)) : Promise.resolve(null),
     lat && lon
@@ -47,6 +47,7 @@ export async function GET(req: NextRequest) {
     lat && lon ? fetchDaylight(Number(lat), Number(lon)) : Promise.resolve(null),
   ]);
 
+  let current: VivaObservation | null = vivaCurrent;
   const forecast = forecastRes.points;
   const forecastSource = forecastRes.source;
   const diag: Record<string, string> = {};
@@ -83,7 +84,57 @@ export async function GET(req: NextRequest) {
     if (om.error) diag.history = om.error;
   }
 
-  // Anchor the chart at NOW using VIVA's live observation — the freshest real
+  // Resolve the live reading, preferring real measurements over forecast:
+  //   1. the spot's own VIVA station (freshest — updates every 5–15 min)
+  //   2. the nearest VIVA station that actually reports wind
+  //   3. the latest point of the measured history resolved above
+  //   4. nothing — the client then derives a reading from the forecast
+  let currentStation: { name: string; distanceKm: number } | null = null;
+
+  if (!current?.hasWind && lat && lon) {
+    const candidates = await findNearestVivaStations(Number(lat), Number(lon));
+    for (const c of candidates) {
+      if (c.id === Number(vivaId)) continue;
+      const obs = await fetchVivaStation(c.id);
+      if (obs?.hasWind) {
+        // Keep any sensor readings the spot's own station did provide —
+        // those are genuinely local — and only borrow the wind.
+        current = {
+          ...obs,
+          waterTemp: current?.waterTemp ?? obs.waterTemp,
+          airTemp: current?.airTemp ?? obs.airTemp,
+        };
+        currentStation = { name: c.name, distanceKm: c.distanceKm };
+        break;
+      }
+    }
+  }
+
+  // Still no live wind, but the chart is backed by real measurements? Use their
+  // newest point rather than falling through to forecast — a measurement from a
+  // nearby station beats a model value for the spot itself.
+  if (!current?.hasWind && history && !historyIsModelled) {
+    const lastSpeed = history.windSpeed[history.windSpeed.length - 1];
+    const lastGust = history.gust[history.gust.length - 1];
+    const lastDir = history.windDir[history.windDir.length - 1];
+    if (lastSpeed) {
+      const measured: VivaObservation = {
+        avgWind: lastSpeed.value,
+        gust: lastGust?.value ?? 0,
+        heading: lastDir?.value ?? 0,
+        updatedAt: new Date(lastSpeed.time).toISOString(),
+        airTemp: current?.airTemp,
+        waterTemp: current?.waterTemp,
+        hasWind: true,
+      };
+      current = measured;
+      if (!currentStation && obsStation) {
+        currentStation = { name: obsStation.name, distanceKm: obsStation.distanceKm };
+      }
+    }
+  }
+
+  // Anchor the chart at NOW using the live observation — the freshest real
   // data we have. Without this the obs line ends at the last hourly bucket
   // (often 15–60 min old) and there's a visible gap up to the "NOW" marker.
   if (current?.hasWind && history) {
@@ -106,7 +157,17 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json(
-    { current, history, forecast, forecastSource, daylight, historyIsModelled, obsStation, diag },
+    {
+      current,
+      currentStation,
+      history,
+      forecast,
+      forecastSource,
+      daylight,
+      historyIsModelled,
+      obsStation,
+      diag,
+    },
     { headers: { 'Cache-Control': 's-maxage=300, stale-while-revalidate=60' } }
   );
 }

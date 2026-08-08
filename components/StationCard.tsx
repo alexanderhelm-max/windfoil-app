@@ -32,6 +32,8 @@ interface StationCardProps {
   airTempIsForecast?: boolean;
   /** True when the wind values came from forecast (e.g. station with no wind sensor) */
   windIsForecast?: boolean;
+  /** Set when the live reading came from a nearby station rather than this spot's own */
+  currentStation?: { name: string; distanceKm: number } | null;
   daylight?: DaylightInfo | null;
 }
 
@@ -79,6 +81,7 @@ export default function StationCard({
   onRemove,
   airTempIsForecast = false,
   windIsForecast = false,
+  currentStation = null,
   daylight,
 }: StationCardProps) {
   const avgWind = current?.avgWind ?? 0;
@@ -259,6 +262,14 @@ export default function StationCard({
               )}
             </div>
             <span className="text-slate-500 text-xs whitespace-nowrap">
+              {currentStation && !windIsForecast && (
+                <span
+                  className="text-emerald-500/80 mr-1.5"
+                  title={`Measured at ${currentStation.name}, ${currentStation.distanceKm.toFixed(0)} km away — no sensor at this spot.`}
+                >
+                  via {currentStation.name} {currentStation.distanceKm.toFixed(0)} km ·
+                </span>
+              )}
               Updated {formatUpdated(current.updatedAt)}
             </span>
           </div>

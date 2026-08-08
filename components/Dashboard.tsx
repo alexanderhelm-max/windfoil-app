@@ -22,6 +22,8 @@ interface FetchedData {
   historyIsModelled?: boolean;
   /** Set when past wind came from an auto-resolved nearby SMHI station */
   obsStation?: { id: number; name: string; distanceKm: number } | null;
+  /** Set when the live reading came from a nearby station rather than this spot's own */
+  currentStation?: { name: string; distanceKm: number } | null;
   /** Per-source failure reasons from the API (e.g. { forecast: 'timeout after 8000ms' }) */
   diag?: Record<string, string>;
 }
@@ -206,6 +208,7 @@ export default function Dashboard() {
       history: d?.history ?? null,
       historyIsModelled: d?.historyIsModelled ?? false,
       obsStation: d?.obsStation ?? null,
+      currentStation: d?.currentStation ?? null,
       forecast: d?.forecast ?? [],
       daylight: d?.daylight ?? null,
       recentObs,
@@ -350,6 +353,7 @@ export default function Dashboard() {
                 onRemove={handleRemove}
                 airTempIsForecast={e.airTempIsForecast}
                 windIsForecast={e.windIsForecast}
+                currentStation={e.currentStation}
                 daylight={e.daylight}
               />
             </div>
