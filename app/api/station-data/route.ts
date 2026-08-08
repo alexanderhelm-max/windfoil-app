@@ -141,17 +141,17 @@ export async function GET(req: NextRequest) {
   // Anchor the chart at NOW using the live observation — the freshest real
   // data we have. Without this the obs line ends at the last hourly bucket
   // (often 15–60 min old) and there's a visible gap up to the "NOW" marker.
+  // Anchored at fetch time, NOT at current.updatedAt: VIVA's Updated field is
+  // a bare "HH:mm" clock string that Date() can't parse (which used to make
+  // this whole block silently no-op), and the reading is at most ~15 min old.
   if (current?.hasWind && history) {
-    const nowTs = new Date(current.updatedAt).getTime();
-    if (!isNaN(nowTs)) {
-      // Guard against duplicating an existing point at the same second.
-      const lastSpeedTs = history.windSpeed[history.windSpeed.length - 1]?.time ?? 0;
-      if (nowTs > lastSpeedTs) {
-        history.windSpeed.push({ time: nowTs, value: current.avgWind });
-        if (current.gust > 0) history.gust.push({ time: nowTs, value: current.gust });
-        if (typeof current.heading === 'number') {
-          history.windDir.push({ time: nowTs, value: current.heading });
-        }
+    const nowTs = Date.now();
+    const lastSpeedTs = history.windSpeed[history.windSpeed.length - 1]?.time ?? 0;
+    if (nowTs > lastSpeedTs) {
+      history.windSpeed.push({ time: nowTs, value: current.avgWind });
+      if (current.gust > 0) history.gust.push({ time: nowTs, value: current.gust });
+      if (typeof current.heading === 'number') {
+        history.windDir.push({ time: nowTs, value: current.heading });
       }
     }
   }
