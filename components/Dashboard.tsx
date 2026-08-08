@@ -17,9 +17,15 @@ interface FetchedData {
   history: SmhiObsHistory | null;
   forecast: ForecastPoint[];
   forecastSource?: ForecastSource | null;
+  /** Second forecast opinion (SMHI point forecast) for the chart */
+  forecastSmhi?: ForecastPoint[];
   daylight: DaylightInfo | null;
   /** True when history came from Open-Meteo model rather than SMHI measured obs */
   historyIsModelled?: boolean;
+  /** Source of measured past wind: which provider/station and how far away */
+  obsStation?: { id: number; name: string; distanceKm: number; provider?: 'viva' | 'smhi' } | null;
+  /** Set when the live reading came from a nearby station rather than this spot's own */
+  currentStation?: { name: string; distanceKm: number } | null;
   /** Per-source failure reasons from the API (e.g. { forecast: 'timeout after 8000ms' }) */
   diag?: Record<string, string>;
 }
@@ -203,6 +209,10 @@ export default function Dashboard() {
       current,
       history: d?.history ?? null,
       historyIsModelled: d?.historyIsModelled ?? false,
+      obsStation: d?.obsStation ?? null,
+      currentStation: d?.currentStation ?? null,
+      forecastSource: d?.forecastSource ?? null,
+      forecastSmhi: d?.forecastSmhi ?? [],
       forecast: d?.forecast ?? [],
       daylight: d?.daylight ?? null,
       recentObs,
@@ -347,6 +357,7 @@ export default function Dashboard() {
                 onRemove={handleRemove}
                 airTempIsForecast={e.airTempIsForecast}
                 windIsForecast={e.windIsForecast}
+                currentStation={e.currentStation}
                 daylight={e.daylight}
               />
             </div>
@@ -367,6 +378,9 @@ export default function Dashboard() {
             history={selectedEntry.history}
             forecast={selectedEntry.forecast}
             historyIsModelled={selectedEntry.historyIsModelled}
+            obsStation={selectedEntry.obsStation}
+            forecastSource={selectedEntry.forecastSource}
+            forecastSmhi={selectedEntry.forecastSmhi}
           />
         )}
       </section>

@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchVivaStation } from '@/lib/viva';
+import {
+  fetchVivaStation,
+  fetchVivaHistory,
+  findNearestVivaStations,
+  getVivaStationInfo,
+  VivaObservation,
+} from '@/lib/viva';
 import {
   fetchSmhiHistory,
   fetchSmhiForecast,
+  fetchSmhiMetfcstForecast,
   fetchDaylight,
   fetchOpenMeteoHistory,
+  findNearestObsStation,
+  getObsStationInfo,
   SmhiObsHistory,
+  ObsStationRef,
 } from '@/lib/smhi';
 
 function isEmptyHistory(h: SmhiObsHistory | null): boolean {
@@ -36,47 +46,151 @@ export async function GET(req: NextRequest) {
   const lat = sp.get('lat');
   const lon = sp.get('lon');
 
-  const [current, smhiHistory, forecastRes, daylight] = await Promise.all([
+  const [vivaCurrent, smhiHistory, forecastRes, smhiFctRes, daylight] = await Promise.all([
     vivaId ? fetchVivaStation(Number(vivaId)) : Promise.resolve(null),
     smhiObsId ? fetchSmhiHistory(Number(smhiObsId)) : Promise.resolve(null),
     lat && lon
       ? fetchSmhiForecast(Number(lat), Number(lon))
       : Promise.resolve({ points: [], error: null, source: null as null }),
+    lat && lon
+      ? fetchSmhiMetfcstForecast(Number(lat), Number(lon))
+      : Promise.resolve({ points: [], error: null }),
     lat && lon ? fetchDaylight(Number(lat), Number(lon)) : Promise.resolve(null),
   ]);
 
+  let current: VivaObservation | null = vivaCurrent;
   const forecast = forecastRes.points;
   const forecastSource = forecastRes.source;
+  // Second forecast opinion for the chart. When the primary already fell back
+  // to SMHI (Open-Meteo down), the second source would duplicate it — omit.
+  const forecastSmhi = forecastRes.source === 'open-meteo' ? smhiFctRes.points : [];
   const diag: Record<string, string> = {};
   if (forecastRes.error) diag.forecast = forecastRes.error;
 
-  // Fall back to Open-Meteo "model history" if SMHI has nothing, OR if the newest
-  // SMHI point is too stale to be useful in the chart's zoomed-in views.
-  let history: SmhiObsHistory | null = smhiHistory;
+  const isUsable = (h: SmhiObsHistory | null) => !isEmptyHistory(h) && !isStaleHistory(h);
+
+  // Resolve the live reading first, preferring real measurements over forecast:
+  //   1. the spot's own VIVA station (freshest — updates every 5–15 min)
+  //   2. the nearest VIVA station that actually reports wind
+  //   3. (after history resolves below) the newest measured history point
+  //   4. nothing — the client then derives a reading from the forecast
+  // Track which VIVA station supplied the wind: it is also the preferred
+  // history source, since VIVA serves 24h series at 10-minute resolution.
+  let currentStation: { name: string; distanceKm: number } | null = null;
+  let liveVivaId: number | null = current?.hasWind && vivaId ? Number(vivaId) : null;
+
+  if (!current?.hasWind && lat && lon) {
+    const candidates = (await findNearestVivaStations(Number(lat), Number(lon), 5)).filter(
+      (c) => c.id !== Number(vivaId)
+    );
+    // Probe candidates together rather than in sequence: most VIVA stations
+    // carry only water level or temperature, so several misses before a hit is
+    // the normal case and doing it serially would stack up round-trips.
+    const observations = await Promise.all(candidates.map((c) => fetchVivaStation(c.id)));
+    // Candidates are distance-sorted, so the first hit is the closest with wind.
+    const hit = candidates.findIndex((_, i) => observations[i]?.hasWind);
+    if (hit !== -1) {
+      const obs = observations[hit] as VivaObservation;
+      // Keep any sensor readings the spot's own station did provide —
+      // those are genuinely local — and only borrow the wind.
+      current = {
+        ...obs,
+        waterTemp: current?.waterTemp ?? obs.waterTemp,
+        airTemp: current?.airTemp ?? obs.airTemp,
+      };
+      currentStation = { name: candidates[hit].name, distanceKm: candidates[hit].distanceKm };
+      liveVivaId = candidates[hit].id;
+    }
+  }
+
+  // Resolve past wind, preferring real measurements over model output:
+  //   1. VIVA history from the station supplying the live wind (10-min resolution)
+  //   2. the explicitly configured SMHI station, if it has fresh data (hourly)
+  //   3. the nearest active SMHI wind station, if it has fresh data
+  //   4. Open-Meteo model history (clearly labelled as modelled in the UI)
+  let history: SmhiObsHistory | null = null;
   let historyIsModelled = false;
-  if ((isEmptyHistory(smhiHistory) || isStaleHistory(smhiHistory)) && lat && lon) {
+  let obsStation: (ObsStationRef & { provider: 'viva' | 'smhi' }) | null = null;
+
+  if (liveVivaId != null) {
+    const vh = await fetchVivaHistory(liveVivaId);
+    if (isUsable(vh)) {
+      history = vh;
+      if (lat && lon) {
+        const info = await getVivaStationInfo(liveVivaId, Number(lat), Number(lon));
+        if (info) obsStation = { ...info, provider: 'viva' };
+      }
+    }
+  }
+
+  if (!isUsable(history) && isUsable(smhiHistory)) {
+    history = smhiHistory;
+    if (smhiObsId && lat && lon) {
+      const info = await getObsStationInfo(Number(smhiObsId), Number(lat), Number(lon));
+      if (info) obsStation = { ...info, provider: 'smhi' };
+    }
+  }
+
+  if (!isUsable(history) && lat && lon) {
+    const nearest = await findNearestObsStation(Number(lat), Number(lon));
+    // Skip if it resolves to the station we already tried and found unusable.
+    if (nearest && nearest.id !== Number(smhiObsId)) {
+      const nearestHistory = await fetchSmhiHistory(nearest.id);
+      if (isUsable(nearestHistory)) {
+        history = nearestHistory;
+        obsStation = { ...nearest, provider: 'smhi' };
+      }
+    }
+  }
+
+  if (!isUsable(history) && lat && lon) {
     const om = await fetchOpenMeteoHistory(Number(lat), Number(lon));
     if (om.history) {
       history = om.history;
       historyIsModelled = true;
+      obsStation = null;
     }
     if (om.error) diag.history = om.error;
   }
 
-  // Anchor the chart at NOW using VIVA's live observation — the freshest real
+  // Still no live wind, but the chart is backed by real measurements? Use their
+  // newest point rather than falling through to forecast — a measurement from a
+  // nearby station beats a model value for the spot itself.
+  if (!current?.hasWind && history && !historyIsModelled) {
+    const lastSpeed = history.windSpeed[history.windSpeed.length - 1];
+    const lastGust = history.gust[history.gust.length - 1];
+    const lastDir = history.windDir[history.windDir.length - 1];
+    if (lastSpeed) {
+      const measured: VivaObservation = {
+        avgWind: lastSpeed.value,
+        gust: lastGust?.value ?? 0,
+        heading: lastDir?.value ?? 0,
+        updatedAt: new Date(lastSpeed.time).toISOString(),
+        airTemp: current?.airTemp,
+        waterTemp: current?.waterTemp,
+        hasWind: true,
+      };
+      current = measured;
+      if (!currentStation && obsStation) {
+        currentStation = { name: obsStation.name, distanceKm: obsStation.distanceKm };
+      }
+    }
+  }
+
+  // Anchor the chart at NOW using the live observation — the freshest real
   // data we have. Without this the obs line ends at the last hourly bucket
   // (often 15–60 min old) and there's a visible gap up to the "NOW" marker.
+  // Anchored at fetch time, NOT at current.updatedAt: VIVA's Updated field is
+  // a bare "HH:mm" clock string that Date() can't parse (which used to make
+  // this whole block silently no-op), and the reading is at most ~15 min old.
   if (current?.hasWind && history) {
-    const nowTs = new Date(current.updatedAt).getTime();
-    if (!isNaN(nowTs)) {
-      // Guard against duplicating an existing point at the same second.
-      const lastSpeedTs = history.windSpeed[history.windSpeed.length - 1]?.time ?? 0;
-      if (nowTs > lastSpeedTs) {
-        history.windSpeed.push({ time: nowTs, value: current.avgWind });
-        if (current.gust > 0) history.gust.push({ time: nowTs, value: current.gust });
-        if (typeof current.heading === 'number') {
-          history.windDir.push({ time: nowTs, value: current.heading });
-        }
+    const nowTs = Date.now();
+    const lastSpeedTs = history.windSpeed[history.windSpeed.length - 1]?.time ?? 0;
+    if (nowTs > lastSpeedTs) {
+      history.windSpeed.push({ time: nowTs, value: current.avgWind });
+      if (current.gust > 0) history.gust.push({ time: nowTs, value: current.gust });
+      if (typeof current.heading === 'number') {
+        history.windDir.push({ time: nowTs, value: current.heading });
       }
     }
   }
@@ -86,7 +200,18 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json(
-    { current, history, forecast, forecastSource, daylight, historyIsModelled, diag },
+    {
+      current,
+      currentStation,
+      history,
+      forecast,
+      forecastSource,
+      forecastSmhi,
+      daylight,
+      historyIsModelled,
+      obsStation,
+      diag,
+    },
     { headers: { 'Cache-Control': 's-maxage=300, stale-while-revalidate=60' } }
   );
 }

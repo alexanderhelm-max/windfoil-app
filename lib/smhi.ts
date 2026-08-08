@@ -1,3 +1,5 @@
+import { haversineKm, STATION_MAX_KM } from './geo';
+
 const OBS_BASE = 'https://opendata-download-metobs.smhi.se/api/version/latest';
 // SMHI replaced pmp3g/v2 with snow1g/v1 on 2026-03-31. Nordic-only point forecast.
 const FCT_BASE = 'https://opendata-download-metfcst.smhi.se/api/category/snow1g/version/1/geotype/point';
@@ -41,6 +43,73 @@ async function fetchJsonWithDiag(
 export interface SmhiObsPoint {
   time: number; // epoch ms
   value: number;
+}
+
+export interface ObsStationRef {
+  id: number;
+  name: string;
+  distanceKm: number;
+}
+
+interface SmhiStationRaw {
+  key: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  active?: boolean;
+}
+
+/**
+ * Find the closest active SMHI station that measures wind speed (parameter 4).
+ *
+ * We resolve this from SMHI's own live roster rather than hardcoding station
+ * ids: ids we can't verify would silently attribute a different spot's wind to
+ * this one, and the roster changes as stations come and go. The list is cached
+ * for a day — it rarely changes.
+ */
+async function fetchObsRoster(): Promise<SmhiStationRaw[]> {
+  const { data } = await fetchJsonWithDiag(`${OBS_BASE}/parameter/4.json`, {
+    timeoutMs: 8000,
+    revalidate: 86400,
+  });
+  if (!data) return [];
+  return (data as { station?: SmhiStationRaw[] }).station ?? [];
+}
+
+/**
+ * Name + distance for a known SMHI station id, so the UI can attribute
+ * measured history to its source even when the station was configured
+ * explicitly rather than auto-resolved. Best-effort: null if the roster
+ * fetch fails or the id is unknown.
+ */
+export async function getObsStationInfo(
+  id: number,
+  lat: number,
+  lon: number
+): Promise<ObsStationRef | null> {
+  const stations = await fetchObsRoster();
+  const s = stations.find((st) => Number(st.key) === id);
+  if (!s || typeof s.latitude !== 'number' || typeof s.longitude !== 'number') return null;
+  return { id, name: s.name, distanceKm: haversineKm(lat, lon, s.latitude, s.longitude) };
+}
+
+export async function findNearestObsStation(
+  lat: number,
+  lon: number,
+  maxKm = STATION_MAX_KM
+): Promise<ObsStationRef | null> {
+  const stations = await fetchObsRoster();
+  let best: ObsStationRef | null = null;
+  for (const s of stations) {
+    if (s.active === false) continue;
+    if (typeof s.latitude !== 'number' || typeof s.longitude !== 'number') continue;
+    const distanceKm = haversineKm(lat, lon, s.latitude, s.longitude);
+    if (distanceKm > maxKm) continue;
+    if (!best || distanceKm < best.distanceKm) {
+      best = { id: Number(s.key), name: s.name, distanceKm };
+    }
+  }
+  return best;
 }
 
 async function fetchObsParam(stationId: number, param: number): Promise<SmhiObsPoint[]> {
@@ -186,14 +255,14 @@ interface RawHourly {
 }
 
 // 0–48h: hourly. 48–96h: every 6 hours (00, 06, 12, 18 UTC).
-// Includes the current-hour point (up to 60 min in the past) so the forecast
-// line starts at "now" instead of the next top-of-hour, avoiding a visible gap.
+// Strictly future points only: the chart anchors the obs line at NOW with the
+// live reading and bridges the forecast line from that anchor, so a pre-NOW
+// forecast point would just overlap measured history.
 function thinAndFormat(all: RawHourly[]): ForecastPoint[] {
   const now = Date.now();
   const cutoff48h = now + 48 * 3600 * 1000;
-  const includeFrom = now - 60 * 60 * 1000;
   return all
-    .filter((p) => p.epoch >= includeFrom)
+    .filter((p) => p.epoch >= now)
     .filter((p) => {
       if (p.epoch <= cutoff48h) return true;
       return new Date(p.epoch).getUTCHours() % 6 === 0;
@@ -222,7 +291,7 @@ interface Snow1gEntry {
   };
 }
 
-async function fetchSmhiMetfcstForecast(
+export async function fetchSmhiMetfcstForecast(
   lat: number,
   lon: number
 ): Promise<{ points: ForecastPoint[]; error: string | null }> {

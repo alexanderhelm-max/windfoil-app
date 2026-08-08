@@ -33,8 +33,10 @@ export const DEFAULT_STATIONS: Station[] = [
     description: 'Gothenburg north',
     vivaId: 99,
     smhiObsId: 71420,
-    lat: 57.697,
-    lon: 11.855,
+    // Coordinates of VIVA station 99 "Karet (GBG Hamn)" so forecast and
+    // daylight are computed where the wind is actually measured.
+    lat: 57.68775,
+    lon: 11.869629,
   },
   {
     id: 'viva-101',
@@ -42,14 +44,18 @@ export const DEFAULT_STATIONS: Station[] = [
     description: 'Gothenburg harbour',
     vivaId: 101,
     smhiObsId: 71420,
-    lat: 57.714,
-    lon: 11.927,
+    // Coordinates of VIVA station 101 "Torshamnen (GBG Hamn)". The previous
+    // values (57.714, 11.927) pointed at central Gothenburg, 9 km from the
+    // station, so forecasts were fetched for the wrong place.
+    lat: 57.681105,
+    lon: 11.7881,
   },
   {
     id: 'smhi-marstrand',
     name: 'Marstrand',
     description: 'Marstrand archipelago',
-    vivaId: null,
+    // VIVA station 182 "Skallen", 1.4 km from the spot — reports live wind.
+    vivaId: 182,
     smhiObsId: null,
     lat: 57.889,
     lon: 11.582,
