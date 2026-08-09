@@ -8,10 +8,13 @@ import GoWindow from './GoWindow';
 import AlertBanner from './AlertBanner';
 import AddSpotDialog from './AddSpotDialog';
 import SpotSettingsDialog from './SpotSettingsDialog';
+import LogSessionDialog from './LogSessionDialog';
+import SessionLog from './SessionLog';
 import { VivaObservation } from '@/lib/viva';
 import { SmhiObsHistory, ForecastPoint, ForecastSource } from '@/lib/smhi';
 import { getCondition, getHourTrend, WindSector } from '@/lib/wind-utils';
 import { MarineNow } from '@/lib/marine';
+import { Session, addSession, loadSessions } from '@/lib/sessions';
 import { Spot, DEFAULT_SPOTS } from '@/lib/spots';
 import { loadSpots, saveSpots, resetSpots } from '@/lib/spot-store';
 import { buildShareSpotsUrl, decodeSpotsFromParam, copyToClipboard } from '@/lib/share';
@@ -74,6 +77,8 @@ export default function Dashboard() {
   const [selectedSpotId, setSelectedSpotId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [editingSectorsId, setEditingSectorsId] = useState<string | null>(null);
+  const [loggingSpotId, setLoggingSpotId] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<Session[]>([]);
   const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null);
   const [pendingImport, setPendingImport] = useState<Spot[] | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
@@ -89,6 +94,7 @@ export default function Dashboard() {
     setSpots(loaded);
     setHydrated(true);
     if (localStorage.getItem(VIEW_KEY) === 'map') setView('map');
+    setSessions(loadSessions());
 
     const param = new URLSearchParams(window.location.search).get('spots');
     if (param) {
@@ -542,6 +548,7 @@ export default function Dashboard() {
                 goodSectors={e.spot.goodSectors}
                 marine={e.marine}
                 onEditSectors={setEditingSectorsId}
+                onLogSession={setLoggingSpotId}
               />
             </div>
           ))}
@@ -578,6 +585,23 @@ export default function Dashboard() {
             spot={spot}
             onSave={(settings) => handleSaveSettings(spot.id, settings)}
             onClose={() => setEditingSectorsId(null)}
+          />
+        ) : null;
+      })()}
+
+      <SessionLog sessions={sessions} onChange={setSessions} />
+
+      {loggingSpotId && (() => {
+        const e = effectiveSpots.find((x) => x.spot.id === loggingSpotId);
+        return e ? (
+          <LogSessionDialog
+            spot={e.spot}
+            history={e.history}
+            marine={e.marine}
+            historyIsModelled={e.historyIsModelled}
+            stationName={e.obsStation?.name}
+            onSave={(session) => setSessions(addSession(session))}
+            onClose={() => setLoggingSpotId(null)}
           />
         ) : null;
       })()}

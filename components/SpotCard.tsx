@@ -33,6 +33,8 @@ interface SpotCardProps {
   onRemove?: (id: string) => void;
   /** Opens the compass editor for this spot's working directions */
   onEditSectors?: (id: string) => void;
+  /** Opens the session logger for this spot */
+  onLogSession?: (id: string) => void;
   /** True when the air temp came from forecast rather than a real sensor */
   airTempIsForecast?: boolean;
   /** True when the wind values came from forecast (e.g. station with no wind sensor) */
@@ -77,6 +79,7 @@ export default function SpotCard({
   onClick,
   onRemove,
   onEditSectors,
+  onLogSession,
   airTempIsForecast = false,
   windIsForecast = false,
   currentStation = null,
@@ -118,6 +121,17 @@ export default function SpotCard({
             message={formatSpotMessage(name, description, current, getAppUrl(), goodSectors)}
             label={`Share ${name}`}
           />
+        )}
+        {onLogSession && current && (
+          <button
+            type="button"
+            aria-label={`Log a session at ${name}`}
+            title="Log a session here"
+            onClick={() => onLogSession(id)}
+            className="w-7 h-7 flex items-center justify-center rounded-full bg-slate-900/60 text-slate-400 hover:bg-amber-900/70 hover:text-amber-200 transition text-xs leading-none"
+          >
+            ⭐
+          </button>
         )}
         {onEditSectors && (
           <button
@@ -164,7 +178,7 @@ export default function SpotCard({
         </div>
         {current && (
           <span
-            className="text-xs font-semibold px-2 py-1 rounded-full shrink-0 mr-24"
+            className="text-xs font-semibold px-2 py-1 rounded-full shrink-0 mr-32"
             style={{ backgroundColor: condColor + '33', color: condColor }}
           >
             {conditionLabels[condition]}
