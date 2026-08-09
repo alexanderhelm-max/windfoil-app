@@ -7,10 +7,11 @@ import WindTimeline from './WindTimeline';
 import GoWindow from './GoWindow';
 import AlertBanner from './AlertBanner';
 import AddSpotDialog from './AddSpotDialog';
-import EditSectorsDialog from './EditSectorsDialog';
+import SpotSettingsDialog from './SpotSettingsDialog';
 import { VivaObservation } from '@/lib/viva';
 import { SmhiObsHistory, ForecastPoint, ForecastSource } from '@/lib/smhi';
 import { getCondition, getHourTrend, WindSector } from '@/lib/wind-utils';
+import { MarineNow } from '@/lib/marine';
 import { Spot, DEFAULT_SPOTS } from '@/lib/spots';
 import { loadSpots, saveSpots, resetSpots } from '@/lib/spot-store';
 import { buildShareSpotsUrl, decodeSpotsFromParam, copyToClipboard } from '@/lib/share';
@@ -40,6 +41,8 @@ interface FetchedData {
   obsStation?: { id: number; name: string; distanceKm: number; provider?: 'viva' | 'smhi' } | null;
   /** Set when the live reading came from a nearby station rather than this spot's own */
   currentStation?: { name: string; distanceKm: number } | null;
+  /** Sea state from the wave model; null for sheltered spots and inland points */
+  marine?: MarineNow | null;
   /** Per-source failure reasons from the API (e.g. { forecast: 'timeout after 8000ms' }) */
   diag?: Record<string, string>;
 }
@@ -57,6 +60,7 @@ function buildUrl(s: Spot): string {
   if (s.vivaId != null) params.set('vivaId', String(s.vivaId));
   if (s.smhiObsId != null) params.set('smhiObsId', String(s.smhiObsId));
   if (s.holfuyId != null) params.set('holfuyId', String(s.holfuyId));
+  if (s.sheltered) params.set('sheltered', '1');
   params.set('lat', String(s.lat));
   params.set('lon', String(s.lon));
   return `/api/spot-data?${params.toString()}`;
@@ -170,18 +174,21 @@ export default function Dashboard() {
     [spots, updateSpots, selectedSpotId]
   );
 
-  const handleSaveSectors = useCallback(
-    (id: string, goodSectors: WindSector[]) => {
+  const handleSaveSettings = useCallback(
+    (id: string, settings: { goodSectors: WindSector[]; sheltered: boolean }) => {
       updateSpots(
-        spots.map((s) =>
-          s.id === id
-            ? // Drop the key entirely when nothing is selected, so "unknown"
-              // stays distinguishable from "configured as empty".
-              goodSectors.length > 0
-              ? { ...s, goodSectors }
-              : (({ goodSectors: _drop, ...rest }) => rest)(s)
-            : s
-        )
+        spots.map((s) => {
+          if (s.id !== id) return s;
+          // Drop the keys entirely at their defaults, so "unknown" stays
+          // distinguishable from "configured as empty" and shared links and
+          // stored lists don't carry noise.
+          const { goodSectors: _s, sheltered: _h, ...rest } = s;
+          return {
+            ...rest,
+            ...(settings.goodSectors.length > 0 ? { goodSectors: settings.goodSectors } : {}),
+            ...(settings.sheltered ? { sheltered: true } : {}),
+          };
+        })
       );
     },
     [spots, updateSpots]
@@ -322,6 +329,7 @@ export default function Dashboard() {
       // Computed once here and handed to the card, the ranking and the map,
       // so all three describe the same hour the same way.
       trend: getHourTrend(recentObs),
+      marine: d?.marine ?? null,
       airTempIsForecast,
       windIsForecast,
     };
@@ -532,6 +540,7 @@ export default function Dashboard() {
                 windIsForecast={e.windIsForecast}
                 currentStation={e.currentStation}
                 goodSectors={e.spot.goodSectors}
+                marine={e.marine}
                 onEditSectors={setEditingSectorsId}
               />
             </div>
@@ -565,9 +574,9 @@ export default function Dashboard() {
       {editingSectorsId && (() => {
         const spot = spots.find((s) => s.id === editingSectorsId);
         return spot ? (
-          <EditSectorsDialog
+          <SpotSettingsDialog
             spot={spot}
-            onSave={(sectors) => handleSaveSectors(spot.id, sectors)}
+            onSave={(settings) => handleSaveSettings(spot.id, settings)}
             onClose={() => setEditingSectorsId(null)}
           />
         ) : null;

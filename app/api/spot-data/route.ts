@@ -7,6 +7,7 @@ import {
   VivaObservation,
 } from '@/lib/viva';
 import { fetchHolfuyStation } from '@/lib/holfuy';
+import { fetchMarine } from '@/lib/marine';
 import {
   fetchSmhiHistory,
   fetchSmhiForecast,
@@ -44,10 +45,13 @@ export async function GET(req: NextRequest) {
   const vivaId = sp.get('vivaId');
   const smhiObsId = sp.get('smhiObsId');
   const holfuyId = sp.get('holfuyId');
+  // Sheltered spots skip the wave fetch: a model would answer with the nearest
+  // open-sea cell, which isn't the water at the launch.
+  const sheltered = sp.get('sheltered') === '1';
   const lat = sp.get('lat');
   const lon = sp.get('lon');
 
-  const [vivaCurrent, smhiHistory, forecastRes, smhiFctRes] = await Promise.all([
+  const [vivaCurrent, smhiHistory, forecastRes, smhiFctRes, marineRes] = await Promise.all([
     vivaId ? fetchVivaStation(Number(vivaId)) : Promise.resolve(null),
     smhiObsId ? fetchSmhiHistory(Number(smhiObsId)) : Promise.resolve(null),
     lat && lon
@@ -56,6 +60,9 @@ export async function GET(req: NextRequest) {
     lat && lon
       ? fetchSmhiMetfcstForecast(Number(lat), Number(lon))
       : Promise.resolve({ points: [], error: null }),
+    lat && lon && !sheltered
+      ? fetchMarine(Number(lat), Number(lon))
+      : Promise.resolve({ now: null, error: null }),
   ]);
 
   let current: VivaObservation | null = vivaCurrent;
@@ -64,8 +71,10 @@ export async function GET(req: NextRequest) {
   // Second forecast opinion for the chart. When the primary already fell back
   // to SMHI (Open-Meteo down), the second source would duplicate it — omit.
   const forecastSmhi = forecastRes.source === 'open-meteo' ? smhiFctRes.points : [];
+  const marine = marineRes.now;
   const diag: Record<string, string> = {};
   if (forecastRes.error) diag.forecast = forecastRes.error;
+  if (marineRes.error) diag.marine = marineRes.error;
 
   const isUsable = (h: SmhiObsHistory | null) => !isEmptyHistory(h) && !isStaleHistory(h);
 
@@ -223,6 +232,7 @@ export async function GET(req: NextRequest) {
       forecast,
       forecastSource,
       forecastSmhi,
+      marine,
       historyIsModelled,
       obsStation,
       diag,

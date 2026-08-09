@@ -106,8 +106,8 @@ export function getAppUrl(): string {
 // The list is encoded as a compact JSON tuple array in a base64url query
 // param, so sharing needs no backend: the recipient's browser decodes it and
 // offers an import. Tuple order: [id, name, description, vivaId, smhiObsId,
-// holfuyId, lat, lon, goodSectors?]. The last element was added later, so
-// decoding tolerates its absence.
+// holfuyId, lat, lon, goodSectors?, sheltered?]. Trailing elements were added
+// later, so decoding tolerates their absence.
 
 import type { Spot } from './spots';
 
@@ -121,6 +121,7 @@ type SpotTuple = [
   number,
   number,
   { from: number; to: number }[]?,
+  boolean?,
 ];
 
 export function encodeSpotsToParam(spots: Spot[]): string {
@@ -134,6 +135,7 @@ export function encodeSpotsToParam(spots: Spot[]): string {
     s.lat,
     s.lon,
     s.goodSectors,
+    s.sheltered,
   ]);
   const json = JSON.stringify(compact);
   // btoa only handles latin-1; round-trip through UTF-8 bytes for å/ä/ö.
@@ -173,7 +175,8 @@ export function decodeSpotsFromParam(param: string): Spot[] | null {
     const out: Spot[] = [];
     for (const t of parsed.slice(0, 50)) {
       if (!Array.isArray(t) || t.length < 8) continue;
-      const [id, name, description, vivaId, smhiObsId, holfuyId, lat, lon, sectors] = t as unknown[];
+      const [id, name, description, vivaId, smhiObsId, holfuyId, lat, lon, sectors, sheltered] =
+        t as unknown[];
       if (typeof id !== 'string' || typeof name !== 'string') continue;
       if (typeof lat !== 'number' || typeof lon !== 'number') continue;
       if (lat < -90 || lat > 90 || lon < -180 || lon > 180) continue;
@@ -188,6 +191,7 @@ export function decodeSpotsFromParam(param: string): Spot[] | null {
         lat,
         lon,
         goodSectors: parseSectors(sectors),
+        ...(sheltered === true ? { sheltered: true } : {}),
       });
     }
     return out.length > 0 ? out : null;

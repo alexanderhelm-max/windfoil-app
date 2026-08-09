@@ -17,6 +17,7 @@ import {
 import { formatSpotMessage, getAppUrl } from '@/lib/share';
 import ShareMenu from './ShareMenu';
 import SectorRose from './SectorRose';
+import { MarineNow, seaState } from '@/lib/marine';
 import TrendBadge, { Trend } from './TrendBadge';
 
 interface SpotCardProps {
@@ -40,6 +41,8 @@ interface SpotCardProps {
   currentStation?: { name: string; distanceKm: number } | null;
   /** Compass sectors this spot works in; undefined means grade on speed alone */
   goodSectors?: WindSector[];
+  /** Sea state from the wave model; absent for sheltered spots */
+  marine?: MarineNow | null;
 }
 
 const gustColors: Record<GustLevel, string> = {
@@ -78,6 +81,7 @@ export default function SpotCard({
   windIsForecast = false,
   currentStation = null,
   goodSectors,
+  marine,
 }: SpotCardProps) {
   const avgWind = current?.avgWind ?? 0;
   const gust = current?.gust ?? 0;
@@ -118,8 +122,8 @@ export default function SpotCard({
         {onEditSectors && (
           <button
             type="button"
-            aria-label={`Edit wind directions for ${name}`}
-            title="Which wind directions work here"
+            aria-label={`Settings for ${name}`}
+            title="Wind directions and wave settings"
             onClick={() => onEditSectors(id)}
             className={`w-7 h-7 flex items-center justify-center rounded-full transition text-xs leading-none ${
               goodSectors && goodSectors.length > 0
@@ -245,6 +249,22 @@ export default function SpotCard({
               )}
               {current.waterTemp !== undefined && (
                 <span title="Water temperature">🌊 {current.waterTemp.toFixed(1)}°C</span>
+              )}
+              {marine && (
+                <span
+                  title={
+                    `Wave model (open sea), not measured at this spot.` +
+                    (marine.swellHeight != null && marine.swellPeriod != null
+                      ? ` Swell ${marine.swellHeight.toFixed(1)} m at ${marine.swellPeriod.toFixed(0)} s.`
+                      : '')
+                  }
+                >
+                  〜 {marine.waveHeight.toFixed(1)} m
+                  {marine.wavePeriod != null && ` · ${marine.wavePeriod.toFixed(0)} s`}
+                  {seaState(marine.wavePeriod) && (
+                    <span className="text-slate-500"> {seaState(marine.wavePeriod)}</span>
+                  )}
+                </span>
               )}
             </div>
             <span className="text-slate-500 text-xs whitespace-nowrap">

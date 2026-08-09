@@ -1,44 +1,9 @@
 import { haversineKm, STATION_MAX_KM } from './geo';
+import { fetchJsonWithDiag } from './fetch-json';
 
 const OBS_BASE = 'https://opendata-download-metobs.smhi.se/api/version/latest';
 // SMHI replaced pmp3g/v2 with snow1g/v1 on 2026-03-31. Nordic-only point forecast.
 const FCT_BASE = 'https://opendata-download-metfcst.smhi.se/api/category/snow1g/version/1/geotype/point';
-
-/**
- * Fetch JSON with a timeout and one retry on transient failures (timeout, 5xx, 429).
- * Returns the parsed body or a short error string describing why it failed —
- * so callers can surface the real reason instead of silently returning empty.
- */
-async function fetchJsonWithDiag(
-  url: string,
-  opts: { timeoutMs: number; revalidate: number; retries?: number }
-): Promise<{ data: unknown | null; error: string | null }> {
-  const { timeoutMs, revalidate, retries = 1 } = opts;
-  let lastError = 'unknown error';
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const res = await fetch(url, {
-        next: { revalidate },
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      if (!res.ok) {
-        lastError = `HTTP ${res.status}`;
-        // Retry only on rate-limit / server errors; 4xx (other) won't fix on retry.
-        if (res.status === 429 || res.status >= 500) continue;
-        return { data: null, error: lastError };
-      }
-      return { data: await res.json(), error: null };
-    } catch (e) {
-      if (e instanceof Error) {
-        lastError = e.name === 'TimeoutError' ? `timeout after ${timeoutMs}ms` : e.message;
-      } else {
-        lastError = String(e);
-      }
-    }
-  }
-  return { data: null, error: lastError };
-}
-
 
 export interface SmhiObsPoint {
   time: number; // epoch ms

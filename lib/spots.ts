@@ -18,6 +18,12 @@ export interface Spot {
    * them was worse than not guessing at all.
    */
   goodSectors?: { from: number; to: number }[];
+  /**
+   * Set for spots behind islands or inside harbours, where a wave model reports
+   * the nearest open-sea cell rather than the water you'd actually launch into.
+   * Skips the marine fetch entirely rather than showing a number that lies.
+   */
+  sheltered?: boolean;
 }
 
 export const DEFAULT_SPOTS: Spot[] = [
