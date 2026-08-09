@@ -1,7 +1,7 @@
 'use client';
 
 import { VivaObservation } from '@/lib/viva';
-import { SmhiObsHistory, DaylightInfo } from '@/lib/smhi';
+import { SmhiObsHistory } from '@/lib/smhi';
 import {
   getCondition,
   getGustLevel,
@@ -16,6 +16,7 @@ import {
 } from '@/lib/wind-utils';
 import { formatSpotMessage, getAppUrl } from '@/lib/share';
 import ShareMenu from './ShareMenu';
+import SectorRose from './SectorRose';
 import TrendBadge, { Trend } from './TrendBadge';
 
 interface SpotCardProps {
@@ -39,18 +40,6 @@ interface SpotCardProps {
   currentStation?: { name: string; distanceKm: number } | null;
   /** Compass sectors this spot works in; undefined means grade on speed alone */
   goodSectors?: WindSector[];
-  daylight?: DaylightInfo | null;
-}
-
-function formatDaylightRemaining(d: DaylightInfo): string {
-  if (!d.isDay) {
-    if (d.remainingMinutes > 0) return 'before sunrise';
-    return 'after sunset';
-  }
-  const h = Math.floor(d.remainingMinutes / 60);
-  const m = d.remainingMinutes % 60;
-  if (h === 0) return `${m}m daylight`;
-  return `${h}h ${m}m daylight`;
 }
 
 const gustColors: Record<GustLevel, string> = {
@@ -89,7 +78,6 @@ export default function SpotCard({
   windIsForecast = false,
   currentStation = null,
   goodSectors,
-  daylight,
 }: SpotCardProps) {
   const avgWind = current?.avgWind ?? 0;
   const gust = current?.gust ?? 0;
@@ -107,87 +95,77 @@ export default function SpotCard({
     : 'border border-slate-700 hover:border-slate-500';
 
   return (
-    <button
-      onClick={onClick}
-      className={`group relative w-full text-left rounded-xl p-4 bg-slate-800 transition-all duration-200 ${
-        isSelected ? 'ring-2 ring-white/20' : 'hover:bg-slate-750'
-      } focus:outline-none focus:ring-2 focus:ring-slate-400`}
+    <div
+      className={`group relative rounded-xl bg-slate-800 transition-all duration-200 ${
+        isSelected ? 'ring-2 ring-white/20' : ''
+      }`}
       style={{
         borderWidth: '2px',
         borderStyle: 'solid',
         borderColor: isSelected ? condColor : '#334155',
       }}
-      aria-pressed={isSelected}
     >
+      {/* Controls sit outside the select button. Nesting them inside it made
+          them part of its accessible name, so a screen reader announced the
+          card as "Nidingen … Share … Edit wind directions … Remove". */}
+      <div className="absolute top-4 right-4 z-10 flex items-center gap-1">
+        {current && (
+          <ShareMenu
+            message={formatSpotMessage(name, description, current, getAppUrl(), goodSectors)}
+            label={`Share ${name}`}
+          />
+        )}
+        {onEditSectors && (
+          <button
+            type="button"
+            aria-label={`Edit wind directions for ${name}`}
+            title="Which wind directions work here"
+            onClick={() => onEditSectors(id)}
+            className={`w-7 h-7 flex items-center justify-center rounded-full transition text-xs leading-none ${
+              goodSectors && goodSectors.length > 0
+                ? 'bg-green-900/50 text-green-300 hover:bg-green-800/70'
+                : 'bg-slate-900/60 text-slate-400 hover:bg-slate-700 hover:text-white'
+            }`}
+          >
+            ⌖
+          </button>
+        )}
+        {onRemove && (
+          <button
+            type="button"
+            aria-label={`Remove ${name}`}
+            onClick={() => {
+              if (confirm(`Remove "${name}" from your spots?`)) onRemove(id);
+            }}
+            className="w-7 h-7 flex items-center justify-center rounded-full bg-slate-900/60 text-slate-400 hover:bg-red-900/80 hover:text-white transition text-sm leading-none"
+          >
+            ×
+          </button>
+        )}
+      </div>
+
+      <button
+        onClick={onClick}
+        aria-pressed={isSelected}
+        aria-label={`${name} — show wind timeline`}
+        className={`w-full text-left rounded-[10px] p-4 ${
+          isSelected ? '' : 'hover:bg-slate-750'
+        } focus:outline-none focus:ring-2 focus:ring-slate-400`}
+      >
       {/* Header */}
       <div className="flex items-start justify-between gap-2 mb-3">
         <div className="min-w-0">
           <h3 className="font-bold text-lg leading-tight truncate">{name}</h3>
           <p className="text-slate-400 text-xs mt-0.5 truncate">{description}</p>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
-          {current && (
-            <span
-              className="text-xs font-semibold px-2 py-1 rounded-full"
-              style={{ backgroundColor: condColor + '33', color: condColor }}
-            >
-              {conditionLabels[condition]}
-            </span>
-          )}
-          {current && (
-            <ShareMenu
-              message={formatSpotMessage(name, description, current, getAppUrl(), goodSectors)}
-              label={`Share ${name}`}
-            />
-          )}
-          {onEditSectors && (
-            <span
-              role="button"
-              aria-label={`Edit wind directions for ${name}`}
-              title="Which wind directions work here"
-              tabIndex={0}
-              onClick={(e) => {
-                e.stopPropagation();
-                onEditSectors(id);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onEditSectors(id);
-                }
-              }}
-              className={`w-7 h-7 flex items-center justify-center rounded-full transition cursor-pointer text-xs leading-none ${
-                goodSectors && goodSectors.length > 0
-                  ? 'bg-green-900/50 text-green-300 hover:bg-green-800/70'
-                  : 'bg-slate-900/60 text-slate-400 hover:bg-slate-700 hover:text-white'
-              }`}
-            >
-              ⌖
-            </span>
-          )}
-          {onRemove && (
-            <span
-              role="button"
-              aria-label={`Remove ${name}`}
-              tabIndex={0}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (confirm(`Remove "${name}" from your spots?`)) onRemove(id);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (confirm(`Remove "${name}" from your spots?`)) onRemove(id);
-                }
-              }}
-              className="w-7 h-7 flex items-center justify-center rounded-full bg-slate-900/60 text-slate-400 hover:bg-red-900/80 hover:text-white transition cursor-pointer text-sm leading-none"
-            >
-              ×
-            </span>
-          )}
-        </div>
+        {current && (
+          <span
+            className="text-xs font-semibold px-2 py-1 rounded-full shrink-0 mr-24"
+            style={{ backgroundColor: condColor + '33', color: condColor }}
+          >
+            {conditionLabels[condition]}
+          </span>
+        )}
       </div>
 
       {current ? (
@@ -231,6 +209,7 @@ export default function SpotCard({
               </svg>
               <span className="font-mono font-semibold text-slate-200">{compassDir}</span>
               <span className="text-slate-400 text-sm">{heading}°</span>
+              <SectorRose sectors={goodSectors} heading={heading} />
             </div>
 
             {/* Gustiness */}
@@ -255,7 +234,7 @@ export default function SpotCard({
             </div>
           )}
 
-          {/* Air + Water temp + Daylight + Updated — wraps on narrow widths */}
+          {/* Air + Water temp + Updated — wraps on narrow widths */}
           <div className="flex flex-wrap items-center justify-between mt-2 gap-x-3 gap-y-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-400">
               {current.airTemp !== undefined && (
@@ -266,14 +245,6 @@ export default function SpotCard({
               )}
               {current.waterTemp !== undefined && (
                 <span title="Water temperature">🌊 {current.waterTemp.toFixed(1)}°C</span>
-              )}
-              {daylight && (
-                <span
-                  title={`Sunset ${daylight.sunset.slice(11, 16)}`}
-                  className={daylight.isDay ? '' : 'text-slate-500'}
-                >
-                  {daylight.isDay ? '🌅' : '🌙'} {formatDaylightRemaining(daylight)}
-                </span>
               )}
             </div>
             <span className="text-slate-500 text-xs whitespace-nowrap">
@@ -303,6 +274,7 @@ export default function SpotCard({
           <p className="text-xs">Forecast only</p>
         </div>
       )}
-    </button>
+      </button>
+    </div>
   );
 }

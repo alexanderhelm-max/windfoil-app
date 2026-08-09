@@ -11,7 +11,6 @@ import {
   fetchSmhiHistory,
   fetchSmhiForecast,
   fetchSmhiMetfcstForecast,
-  fetchDaylight,
   fetchOpenMeteoHistory,
   findNearestObsStation,
   getObsStationInfo,
@@ -48,7 +47,7 @@ export async function GET(req: NextRequest) {
   const lat = sp.get('lat');
   const lon = sp.get('lon');
 
-  const [vivaCurrent, smhiHistory, forecastRes, smhiFctRes, daylight] = await Promise.all([
+  const [vivaCurrent, smhiHistory, forecastRes, smhiFctRes] = await Promise.all([
     vivaId ? fetchVivaStation(Number(vivaId)) : Promise.resolve(null),
     smhiObsId ? fetchSmhiHistory(Number(smhiObsId)) : Promise.resolve(null),
     lat && lon
@@ -57,7 +56,6 @@ export async function GET(req: NextRequest) {
     lat && lon
       ? fetchSmhiMetfcstForecast(Number(lat), Number(lon))
       : Promise.resolve({ points: [], error: null }),
-    lat && lon ? fetchDaylight(Number(lat), Number(lon)) : Promise.resolve(null),
   ]);
 
   let current: VivaObservation | null = vivaCurrent;
@@ -225,7 +223,6 @@ export async function GET(req: NextRequest) {
       forecast,
       forecastSource,
       forecastSmhi,
-      daylight,
       historyIsModelled,
       obsStation,
       diag,

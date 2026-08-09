@@ -17,6 +17,7 @@ import { VivaObservation } from '@/lib/viva';
 import { Spot } from '@/lib/spots';
 import { VIVA_STATIONS_SNAPSHOT, VivaSnapshotStation } from '@/lib/viva-stations.snapshot';
 import TrendBadge, { Trend } from './TrendBadge';
+import SectorRose from './SectorRose';
 import {
   getCondition,
   conditionColors,
@@ -665,10 +666,13 @@ function SpotDetails({ entry, onOpenTimeline }: { entry: MapEntry; onOpenTimelin
             {c.avgWind.toFixed(1)}
           </span>
           <span className="text-sm text-slate-400">m/s</span>
-          <span className="text-xs text-slate-500 ml-auto text-right leading-tight">
-            {c.gust.toFixed(1)} max
-            <br />
-            {headingToCompass(c.heading)} {Math.round(c.heading)}°
+          <span className="text-xs text-slate-500 ml-auto text-right leading-tight flex items-center gap-1.5">
+            <span>
+              {c.gust.toFixed(1)} max
+              <br />
+              {headingToCompass(c.heading)} {Math.round(c.heading)}°
+            </span>
+            <SectorRose sectors={entry.spot.goodSectors} heading={c.heading} size={22} />
           </span>
         </div>
       ) : (

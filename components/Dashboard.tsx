@@ -9,7 +9,7 @@ import AlertBanner from './AlertBanner';
 import AddSpotDialog from './AddSpotDialog';
 import EditSectorsDialog from './EditSectorsDialog';
 import { VivaObservation } from '@/lib/viva';
-import { SmhiObsHistory, ForecastPoint, DaylightInfo, ForecastSource } from '@/lib/smhi';
+import { SmhiObsHistory, ForecastPoint, ForecastSource } from '@/lib/smhi';
 import { getCondition, getHourTrend, WindSector } from '@/lib/wind-utils';
 import { Spot, DEFAULT_SPOTS } from '@/lib/spots';
 import { loadSpots, saveSpots, resetSpots } from '@/lib/spot-store';
@@ -34,7 +34,6 @@ interface FetchedData {
   forecastSource?: ForecastSource | null;
   /** Second forecast opinion (SMHI point forecast) for the chart */
   forecastSmhi?: ForecastPoint[];
-  daylight: DaylightInfo | null;
   /** True when history came from Open-Meteo model rather than SMHI measured obs */
   historyIsModelled?: boolean;
   /** Source of measured past wind: which provider/station and how far away */
@@ -115,14 +114,14 @@ export default function Dashboard() {
             const res = await fetch(buildUrl(s));
             if (!res.ok) return [
               s.id,
-              { current: null, history: null, forecast: [], daylight: null, historyIsModelled: false },
+              { current: null, history: null, forecast: [], historyIsModelled: false },
             ] as const;
             const d = (await res.json()) as FetchedData;
             return [s.id, d] as const;
           } catch {
             return [
               s.id,
-              { current: null, history: null, forecast: [], daylight: null, historyIsModelled: false },
+              { current: null, history: null, forecast: [], historyIsModelled: false },
             ] as const;
           }
         })
@@ -320,7 +319,6 @@ export default function Dashboard() {
       forecastSource: d?.forecastSource ?? null,
       forecastSmhi: d?.forecastSmhi ?? [],
       forecast: d?.forecast ?? [],
-      daylight: d?.daylight ?? null,
       // Computed once here and handed to the card, the ranking and the map,
       // so all three describe the same hour the same way.
       trend: getHourTrend(recentObs),
@@ -535,7 +533,6 @@ export default function Dashboard() {
                 currentStation={e.currentStation}
                 goodSectors={e.spot.goodSectors}
                 onEditSectors={setEditingSectorsId}
-                daylight={e.daylight}
               />
             </div>
           ))}
