@@ -10,7 +10,7 @@ import { VivaObservation } from './viva';
  * their numeric id, visible in the station URL on holfuy.com.
  *
  * Response shape (single station, m=JSON):
- *   { spotId, stationName, dateTime,
+ *   { stationId, stationName, dateTime,
  *     wind: { speed, gust, min, unit, direction }, temperature }
  * Errors come back as non-JSON text or an error field — both handled.
  */

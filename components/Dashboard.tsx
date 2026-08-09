@@ -67,7 +67,7 @@ export default function Dashboard() {
   const [hydrated, setHydrated] = useState(false);
   const [data, setData] = useState<Record<string, FetchedData>>({});
   const [dataLoaded, setDataLoaded] = useState(false);
-  const [selectedSpotId, setSelectedStationId] = useState<string | null>(null);
+  const [selectedSpotId, setSelectedSpotId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null);
   const [pendingImport, setPendingImport] = useState<Spot[] | null>(null);
@@ -164,7 +164,7 @@ export default function Dashboard() {
   const handleRemove = useCallback(
     (id: string) => {
       updateSpots(spots.filter((s) => s.id !== id));
-      if (selectedSpotId === id) setSelectedStationId(null);
+      if (selectedSpotId === id) setSelectedSpotId(null);
     },
     [spots, updateSpots, selectedSpotId]
   );
@@ -173,7 +173,7 @@ export default function Dashboard() {
     if (!confirm('Reset to default spots? Your custom list will be lost.')) return;
     const defaults = resetSpots();
     setSpots([...defaults]);
-    setSelectedStationId(null);
+    setSelectedSpotId(null);
   }, []);
 
   const switchView = useCallback((next: 'list' | 'map') => {
@@ -206,10 +206,10 @@ export default function Dashboard() {
 
   const handleSelectSpot = (spotId: string) => {
     if (selectedSpotId === spotId) {
-      setSelectedStationId(null);
+      setSelectedSpotId(null);
       return;
     }
-    setSelectedStationId(spotId);
+    setSelectedSpotId(spotId);
   };
 
   // When a spot is selected (from card click or from GoWindow ranking),
@@ -231,14 +231,14 @@ export default function Dashboard() {
 
   const handleMapSelect = useCallback((spotId: string) => {
     skipScrollRef.current = true;
-    setSelectedStationId(spotId);
+    setSelectedSpotId(spotId);
   }, []);
 
-  const handleMapDeselect = useCallback(() => setSelectedStationId(null), []);
+  const handleMapDeselect = useCallback(() => setSelectedSpotId(null), []);
 
   const handleOpenTimeline = useCallback((spotId: string) => {
     skipScrollRef.current = false;
-    setSelectedStationId(spotId);
+    setSelectedSpotId(spotId);
     // Same id as already selected wouldn't re-run the effect above, so scroll here.
     window.setTimeout(() => {
       timelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -246,7 +246,7 @@ export default function Dashboard() {
   }, []);
 
   const handleSelectFromRanking = useCallback((spotId: string) => {
-    setSelectedStationId(spotId);
+    setSelectedSpotId(spotId);
   }, []);
 
   // Build effectiveSpots: synthesize current from forecast for spots with no live data
