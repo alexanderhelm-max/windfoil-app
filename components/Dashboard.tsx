@@ -476,6 +476,7 @@ export default function Dashboard() {
             windIsForecast: e.windIsForecast,
             currentStation: e.currentStation,
             trend: e.trend,
+            marine: e.marine,
           }))}
           selectedSpotId={selectedSpotId}
           onSelect={handleMapSelect}

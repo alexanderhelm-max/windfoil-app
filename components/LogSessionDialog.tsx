@@ -8,6 +8,10 @@ import { Session, summariseConditions } from '@/lib/sessions';
 import { headingToCompass } from '@/lib/wind-utils';
 
 const DURATIONS = [1, 2, 3, 4] as const;
+/** Hours-ago options spanning the full day the history covers. */
+const ENDED_AGO = [0, 1, 2, 3, 4, 6, 8, 12, 16, 20] as const;
+/** Observation history reaches 24 h back; a window starting earlier has nothing. */
+const HISTORY_HOURS = 24;
 
 /**
  * Log a session just ridden.
@@ -15,8 +19,9 @@ const DURATIONS = [1, 2, 3, 4] as const;
  * The conditions it will store are shown before saving, because they're a
  * snapshot that can't be recomputed later — if the window is wrong, it has to
  * be fixed now. Observation history only reaches 24 hours back, so the form
- * offers "ended N hours ago" rather than a free date picker: anything older
- * has no conditions left to attach.
+ * offers "ended N hours ago" across the last day rather than a free date
+ * picker, and greys out the combinations whose window would start before the
+ * history reaches — anything older has no conditions left to attach.
  */
 export default function LogSessionDialog({
   spot,
@@ -37,6 +42,18 @@ export default function LogSessionDialog({
 }) {
   const [hours, setHours] = useState<number>(2);
   const [endedAgo, setEndedAgo] = useState<number>(0);
+
+  // A window is reachable only if its start is still inside the history.
+  const outOfRange = (dur: number, ago: number) => dur + ago > HISTORY_HOURS;
+  // Lengthening a session can push an already-old window off the back of the
+  // history, so pull it forward rather than leaving an unsavable selection.
+  function chooseDuration(h: number) {
+    setHours(h);
+    if (outOfRange(h, endedAgo)) {
+      const fits = [...ENDED_AGO].reverse().find((a) => !outOfRange(h, a));
+      setEndedAgo(fits ?? 0);
+    }
+  }
   const [rating, setRating] = useState<1 | 2 | 3 | 4 | 5>(4);
   const [note, setNote] = useState('');
   const [gear, setGear] = useState('');
@@ -114,7 +131,7 @@ export default function LogSessionDialog({
                 <button
                   key={h}
                   type="button"
-                  onClick={() => setHours(h)}
+                  onClick={() => chooseDuration(h)}
                   className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${
                     hours === h
                       ? 'bg-blue-600 text-white'
@@ -130,23 +147,35 @@ export default function LogSessionDialog({
           <div>
             <label className="block text-xs text-slate-400 mb-1.5">Finished</label>
             <div className="flex gap-1.5 flex-wrap">
-              {[0, 1, 2, 4, 6].map((a) => (
-                <button
-                  key={a}
-                  type="button"
-                  onClick={() => setEndedAgo(a)}
-                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${
-                    endedAgo === a
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-900 text-slate-300 hover:bg-slate-700'
-                  }`}
-                >
-                  {a === 0 ? 'just now' : `${a}h ago`}
-                </button>
-              ))}
+              {ENDED_AGO.map((a) => {
+                const disabled = outOfRange(hours, a);
+                return (
+                  <button
+                    key={a}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => setEndedAgo(a)}
+                    title={
+                      disabled
+                        ? `A ${hours}h session ending ${a}h ago starts before the history reaches`
+                        : undefined
+                    }
+                    className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${
+                      endedAgo === a
+                        ? 'bg-blue-600 text-white'
+                        : disabled
+                          ? 'bg-slate-900/50 text-slate-600 cursor-not-allowed'
+                          : 'bg-slate-900 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    {a === 0 ? 'just now' : `${a}h ago`}
+                  </button>
+                );
+              })}
             </div>
             <p className="text-xs text-slate-500 mt-1.5">
-              {fmt(start)} – {fmt(end)}
+              {fmt(start)} – {fmt(end)} · anything older than {HISTORY_HOURS}h has no
+              conditions left to attach
             </p>
           </div>
 

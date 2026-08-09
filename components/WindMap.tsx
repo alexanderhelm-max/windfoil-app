@@ -18,6 +18,7 @@ import { Spot } from '@/lib/spots';
 import { VIVA_STATIONS_SNAPSHOT, VivaSnapshotStation } from '@/lib/viva-stations.snapshot';
 import TrendBadge, { Trend } from './TrendBadge';
 import SectorRose from './SectorRose';
+import { MarineNow, seaState } from '@/lib/marine';
 import {
   getCondition,
   conditionColors,
@@ -31,6 +32,7 @@ export interface MapEntry {
   windIsForecast: boolean;
   currentStation: { name: string; distanceKm: number } | null;
   trend: Trend | null;
+  marine: MarineNow | null;
 }
 
 interface WindMapProps {
@@ -679,7 +681,7 @@ function SpotDetails({ entry, onOpenTimeline }: { entry: MapEntry; onOpenTimelin
         <div className="text-slate-400 text-sm mb-3">No data</div>
       )}
 
-      <div className="flex items-center gap-2 mb-3 text-xs">
+      <div className="flex items-center gap-2 mb-3 text-xs flex-wrap">
         {condition && (
           <span style={{ color: conditionColors[condition] }}>{conditionLabels[condition]}</span>
         )}
@@ -687,6 +689,18 @@ function SpotDetails({ entry, onOpenTimeline }: { entry: MapEntry; onOpenTimelin
           <>
             <span className="text-slate-600">·</span>
             <TrendBadge trend={entry.trend} />
+          </>
+        )}
+        {entry.marine && (
+          <>
+            <span className="text-slate-600">·</span>
+            <span className="text-slate-400" title="Wave model (open sea), not measured here">
+              〜 {entry.marine.waveHeight.toFixed(1)} m
+              {entry.marine.wavePeriod != null && ` · ${entry.marine.wavePeriod.toFixed(0)} s`}
+              {seaState(entry.marine.wavePeriod) && (
+                <span className="text-slate-500"> {seaState(entry.marine.wavePeriod)}</span>
+              )}
+            </span>
           </>
         )}
       </div>
