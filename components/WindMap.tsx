@@ -17,6 +17,8 @@ import { VivaObservation } from '@/lib/viva';
 import { Spot } from '@/lib/spots';
 import { VIVA_STATIONS_SNAPSHOT, VivaSnapshotStation } from '@/lib/viva-stations.snapshot';
 import TrendBadge, { Trend } from './TrendBadge';
+import SectorRose from './SectorRose';
+import { MarineNow, seaState } from '@/lib/marine';
 import {
   getCondition,
   conditionColors,
@@ -30,6 +32,7 @@ export interface MapEntry {
   windIsForecast: boolean;
   currentStation: { name: string; distanceKm: number } | null;
   trend: Trend | null;
+  marine: MarineNow | null;
 }
 
 interface WindMapProps {
@@ -63,13 +66,13 @@ interface SmhiMapStation {
 const NO_DATA_COLOR = '#94a3b8';
 
 /**
- * Colour for a station dot. Direction shifts the thresholds by 1 m/s when the
- * wind is off-sector, so where a station reports no direction we evaluate at a
- * mid-sector bearing — that grades on speed alone rather than guessing badly.
+ * Colour for a station dot. These are sensors, not spots, so they have no
+ * working sectors and are graded on speed alone — direction is passed only
+ * for shape and has no effect without sectors.
  */
 function dotColor(avg: number | null, dir: number | null): string {
   if (avg == null) return NO_DATA_COLOR;
-  return conditionColors[getCondition(avg, dir ?? 250)];
+  return conditionColors[getCondition(avg, dir ?? 0)];
 }
 
 /** Arrow points where the wind is going, so heading (wind FROM) + 180°. */
@@ -96,7 +99,9 @@ function spotIcon(
 ): L.DivIcon {
   const { current } = entry;
   const hasWind = !!current;
-  const condition = hasWind ? getCondition(current.avgWind, current.heading) : 'too-little';
+  const condition = hasWind
+    ? getCondition(current.avgWind, current.heading, entry.spot.goodSectors)
+    : 'too-little';
   const color = hasWind ? conditionColors[condition] : '#64748b';
   const speed = hasWind ? current.avgWind.toFixed(1) : '–';
   const size = isSelected ? 48 : 42;
@@ -627,7 +632,7 @@ function InfoCard({ children, onClose }: { children: React.ReactNode; onClose: (
 
 function SpotDetails({ entry, onOpenTimeline }: { entry: MapEntry; onOpenTimeline: () => void }) {
   const c = entry.current;
-  const condition = c ? getCondition(c.avgWind, c.heading) : null;
+  const condition = c ? getCondition(c.avgWind, c.heading, entry.spot.goodSectors) : null;
   const isLive = !!c && !entry.windIsForecast;
 
   return (
@@ -663,17 +668,20 @@ function SpotDetails({ entry, onOpenTimeline }: { entry: MapEntry; onOpenTimelin
             {c.avgWind.toFixed(1)}
           </span>
           <span className="text-sm text-slate-400">m/s</span>
-          <span className="text-xs text-slate-500 ml-auto text-right leading-tight">
-            {c.gust.toFixed(1)} max
-            <br />
-            {headingToCompass(c.heading)} {Math.round(c.heading)}°
+          <span className="text-xs text-slate-500 ml-auto text-right leading-tight flex items-center gap-1.5">
+            <span>
+              {c.gust.toFixed(1)} max
+              <br />
+              {headingToCompass(c.heading)} {Math.round(c.heading)}°
+            </span>
+            <SectorRose sectors={entry.spot.goodSectors} heading={c.heading} size={22} />
           </span>
         </div>
       ) : (
         <div className="text-slate-400 text-sm mb-3">No data</div>
       )}
 
-      <div className="flex items-center gap-2 mb-3 text-xs">
+      <div className="flex items-center gap-2 mb-3 text-xs flex-wrap">
         {condition && (
           <span style={{ color: conditionColors[condition] }}>{conditionLabels[condition]}</span>
         )}
@@ -681,6 +689,18 @@ function SpotDetails({ entry, onOpenTimeline }: { entry: MapEntry; onOpenTimelin
           <>
             <span className="text-slate-600">·</span>
             <TrendBadge trend={entry.trend} />
+          </>
+        )}
+        {entry.marine && (
+          <>
+            <span className="text-slate-600">·</span>
+            <span className="text-slate-400" title="Wave model (open sea), not measured here">
+              〜 {entry.marine.waveHeight.toFixed(1)} m
+              {entry.marine.wavePeriod != null && ` · ${entry.marine.wavePeriod.toFixed(0)} s`}
+              {seaState(entry.marine.wavePeriod) && (
+                <span className="text-slate-500"> {seaState(entry.marine.wavePeriod)}</span>
+              )}
+            </span>
           </>
         )}
       </div>

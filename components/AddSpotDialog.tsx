@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Spot } from '@/lib/spots';
+import { WindSector } from '@/lib/wind-utils';
+import CompassPicker from './CompassPicker';
 
 interface RemoteStation {
   id: number;
@@ -35,6 +37,8 @@ export default function AddSpotDialog({ existingIds, onAdd, onClose }: AddStatio
   const [smhiList, setSmhiList] = useState<RemoteStation[] | null>(null);
   const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Applies to whichever tab commits — every spot can carry working sectors.
+  const [sectors, setSectors] = useState<WindSector[]>([]);
 
   // VIVA tab state
   const [pickedViva, setPickedViva] = useState<RemoteStation | null>(null);
@@ -114,7 +118,7 @@ export default function AddSpotDialog({ existingIds, onAdd, onClose }: AddStatio
       return;
     }
     setError(null);
-    onAdd(spot);
+    onAdd(sectors.length > 0 ? { ...spot, goodSectors: sectors } : spot);
     onClose();
   }
 
@@ -448,6 +452,15 @@ export default function AddSpotDialog({ existingIds, onAdd, onClose }: AddStatio
               </button>
             </div>
           )}
+
+          {/* Shared by every tab: whichever source you pick, the spot can
+              carry the directions it actually works in. */}
+          <div className="mt-5 pt-4 border-t border-slate-700">
+            <label className="block text-xs text-slate-400 mb-2">
+              Working wind directions (optional)
+            </label>
+            <CompassPicker value={sectors} onChange={setSectors} />
+          </div>
         </div>
       </div>
     </div>

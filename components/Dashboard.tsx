@@ -7,9 +7,14 @@ import WindTimeline from './WindTimeline';
 import GoWindow from './GoWindow';
 import AlertBanner from './AlertBanner';
 import AddSpotDialog from './AddSpotDialog';
+import SpotSettingsDialog from './SpotSettingsDialog';
+import LogSessionDialog from './LogSessionDialog';
+import SessionLog from './SessionLog';
 import { VivaObservation } from '@/lib/viva';
-import { SmhiObsHistory, ForecastPoint, DaylightInfo, ForecastSource } from '@/lib/smhi';
-import { getCondition, getHourTrend } from '@/lib/wind-utils';
+import { SmhiObsHistory, ForecastPoint, ForecastSource } from '@/lib/smhi';
+import { getCondition, getHourTrend, WindSector } from '@/lib/wind-utils';
+import { MarineNow } from '@/lib/marine';
+import { Session, addSession, loadSessions } from '@/lib/sessions';
 import { Spot, DEFAULT_SPOTS } from '@/lib/spots';
 import { loadSpots, saveSpots, resetSpots } from '@/lib/spot-store';
 import { buildShareSpotsUrl, decodeSpotsFromParam, copyToClipboard } from '@/lib/share';
@@ -33,13 +38,14 @@ interface FetchedData {
   forecastSource?: ForecastSource | null;
   /** Second forecast opinion (SMHI point forecast) for the chart */
   forecastSmhi?: ForecastPoint[];
-  daylight: DaylightInfo | null;
   /** True when history came from Open-Meteo model rather than SMHI measured obs */
   historyIsModelled?: boolean;
   /** Source of measured past wind: which provider/station and how far away */
   obsStation?: { id: number; name: string; distanceKm: number; provider?: 'viva' | 'smhi' } | null;
   /** Set when the live reading came from a nearby station rather than this spot's own */
   currentStation?: { name: string; distanceKm: number } | null;
+  /** Sea state from the wave model; null for sheltered spots and inland points */
+  marine?: MarineNow | null;
   /** Per-source failure reasons from the API (e.g. { forecast: 'timeout after 8000ms' }) */
   diag?: Record<string, string>;
 }
@@ -57,6 +63,7 @@ function buildUrl(s: Spot): string {
   if (s.vivaId != null) params.set('vivaId', String(s.vivaId));
   if (s.smhiObsId != null) params.set('smhiObsId', String(s.smhiObsId));
   if (s.holfuyId != null) params.set('holfuyId', String(s.holfuyId));
+  if (s.sheltered) params.set('sheltered', '1');
   params.set('lat', String(s.lat));
   params.set('lon', String(s.lon));
   return `/api/spot-data?${params.toString()}`;
@@ -69,6 +76,9 @@ export default function Dashboard() {
   const [dataLoaded, setDataLoaded] = useState(false);
   const [selectedSpotId, setSelectedSpotId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [editingSectorsId, setEditingSectorsId] = useState<string | null>(null);
+  const [loggingSpotId, setLoggingSpotId] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<Session[]>([]);
   const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null);
   const [pendingImport, setPendingImport] = useState<Spot[] | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
@@ -84,6 +94,7 @@ export default function Dashboard() {
     setSpots(loaded);
     setHydrated(true);
     if (localStorage.getItem(VIEW_KEY) === 'map') setView('map');
+    setSessions(loadSessions());
 
     const param = new URLSearchParams(window.location.search).get('spots');
     if (param) {
@@ -113,14 +124,14 @@ export default function Dashboard() {
             const res = await fetch(buildUrl(s));
             if (!res.ok) return [
               s.id,
-              { current: null, history: null, forecast: [], daylight: null, historyIsModelled: false },
+              { current: null, history: null, forecast: [], historyIsModelled: false },
             ] as const;
             const d = (await res.json()) as FetchedData;
             return [s.id, d] as const;
           } catch {
             return [
               s.id,
-              { current: null, history: null, forecast: [], daylight: null, historyIsModelled: false },
+              { current: null, history: null, forecast: [], historyIsModelled: false },
             ] as const;
           }
         })
@@ -167,6 +178,26 @@ export default function Dashboard() {
       if (selectedSpotId === id) setSelectedSpotId(null);
     },
     [spots, updateSpots, selectedSpotId]
+  );
+
+  const handleSaveSettings = useCallback(
+    (id: string, settings: { goodSectors: WindSector[]; sheltered: boolean }) => {
+      updateSpots(
+        spots.map((s) => {
+          if (s.id !== id) return s;
+          // Drop the keys entirely at their defaults, so "unknown" stays
+          // distinguishable from "configured as empty" and shared links and
+          // stored lists don't carry noise.
+          const { goodSectors: _s, sheltered: _h, ...rest } = s;
+          return {
+            ...rest,
+            ...(settings.goodSectors.length > 0 ? { goodSectors: settings.goodSectors } : {}),
+            ...(settings.sheltered ? { sheltered: true } : {}),
+          };
+        })
+      );
+    },
+    [spots, updateSpots]
   );
 
   const handleReset = useCallback(() => {
@@ -301,10 +332,10 @@ export default function Dashboard() {
       forecastSource: d?.forecastSource ?? null,
       forecastSmhi: d?.forecastSmhi ?? [],
       forecast: d?.forecast ?? [],
-      daylight: d?.daylight ?? null,
       // Computed once here and handed to the card, the ranking and the map,
       // so all three describe the same hour the same way.
       trend: getHourTrend(recentObs),
+      marine: d?.marine ?? null,
       airTempIsForecast,
       windIsForecast,
     };
@@ -315,12 +346,12 @@ export default function Dashboard() {
   const greatSpots = effectiveSpots
     .filter((e) => {
       if (!e.current) return false;
-      const condition = getCondition(e.current.avgWind, e.current.heading);
+      const condition = getCondition(e.current.avgWind, e.current.heading, e.spot.goodSectors);
       return condition === 'great' || condition === 'crazy';
     })
     .map((e) => ({
       name: e.spot.name,
-      condition: getCondition(e.current!.avgWind, e.current!.heading) as 'great' | 'crazy',
+      condition: getCondition(e.current!.avgWind, e.current!.heading, e.spot.goodSectors) as 'great' | 'crazy',
       avgWind: e.current!.avgWind,
     }));
 
@@ -330,6 +361,7 @@ export default function Dashboard() {
     current: e.current,
     forecast: e.forecast,
     trend: e.trend,
+    goodSectors: e.spot.goodSectors,
   }));
 
   // Surface forecast status:
@@ -444,6 +476,7 @@ export default function Dashboard() {
             windIsForecast: e.windIsForecast,
             currentStation: e.currentStation,
             trend: e.trend,
+            marine: e.marine,
           }))}
           selectedSpotId={selectedSpotId}
           onSelect={handleMapSelect}
@@ -513,7 +546,10 @@ export default function Dashboard() {
                 airTempIsForecast={e.airTempIsForecast}
                 windIsForecast={e.windIsForecast}
                 currentStation={e.currentStation}
-                daylight={e.daylight}
+                goodSectors={e.spot.goodSectors}
+                marine={e.marine}
+                onEditSectors={setEditingSectorsId}
+                onLogSession={setLoggingSpotId}
               />
             </div>
           ))}
@@ -538,9 +574,38 @@ export default function Dashboard() {
             obsStation={selectedEntry.obsStation}
             forecastSource={selectedEntry.forecastSource}
             forecastSmhi={selectedEntry.forecastSmhi}
+            goodSectors={selectedEntry.spot.goodSectors}
           />
         )}
       </section>
+
+      {editingSectorsId && (() => {
+        const spot = spots.find((s) => s.id === editingSectorsId);
+        return spot ? (
+          <SpotSettingsDialog
+            spot={spot}
+            onSave={(settings) => handleSaveSettings(spot.id, settings)}
+            onClose={() => setEditingSectorsId(null)}
+          />
+        ) : null;
+      })()}
+
+      <SessionLog sessions={sessions} onChange={setSessions} />
+
+      {loggingSpotId && (() => {
+        const e = effectiveSpots.find((x) => x.spot.id === loggingSpotId);
+        return e ? (
+          <LogSessionDialog
+            spot={e.spot}
+            history={e.history}
+            marine={e.marine}
+            historyIsModelled={e.historyIsModelled}
+            stationName={e.obsStation?.name}
+            onSave={(session) => setSessions(addSession(session))}
+            onClose={() => setLoggingSpotId(null)}
+          />
+        ) : null;
+      })()}
 
       {showAdd && (
         <AddSpotDialog

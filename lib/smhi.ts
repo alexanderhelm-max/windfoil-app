@@ -1,44 +1,9 @@
 import { haversineKm, STATION_MAX_KM } from './geo';
+import { fetchJsonWithDiag } from './fetch-json';
 
 const OBS_BASE = 'https://opendata-download-metobs.smhi.se/api/version/latest';
 // SMHI replaced pmp3g/v2 with snow1g/v1 on 2026-03-31. Nordic-only point forecast.
 const FCT_BASE = 'https://opendata-download-metfcst.smhi.se/api/category/snow1g/version/1/geotype/point';
-
-/**
- * Fetch JSON with a timeout and one retry on transient failures (timeout, 5xx, 429).
- * Returns the parsed body or a short error string describing why it failed —
- * so callers can surface the real reason instead of silently returning empty.
- */
-async function fetchJsonWithDiag(
-  url: string,
-  opts: { timeoutMs: number; revalidate: number; retries?: number }
-): Promise<{ data: unknown | null; error: string | null }> {
-  const { timeoutMs, revalidate, retries = 1 } = opts;
-  let lastError = 'unknown error';
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const res = await fetch(url, {
-        next: { revalidate },
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      if (!res.ok) {
-        lastError = `HTTP ${res.status}`;
-        // Retry only on rate-limit / server errors; 4xx (other) won't fix on retry.
-        if (res.status === 429 || res.status >= 500) continue;
-        return { data: null, error: lastError };
-      }
-      return { data: await res.json(), error: null };
-    } catch (e) {
-      if (e instanceof Error) {
-        lastError = e.name === 'TimeoutError' ? `timeout after ${timeoutMs}ms` : e.message;
-      } else {
-        lastError = String(e);
-      }
-    }
-  }
-  return { data: null, error: lastError };
-}
-
 
 export interface SmhiObsPoint {
   time: number; // epoch ms
@@ -148,50 +113,6 @@ export interface ForecastPoint {
   windDir: number;
   gust: number;
   airTemp?: number;
-}
-
-export interface DaylightInfo {
-  sunrise: string; // ISO local time, e.g. "2026-05-03T05:14"
-  sunset: string;
-  /** Minutes of daylight remaining from now. 0 if past sunset; full duration if before sunrise. */
-  remainingMinutes: number;
-  /** True if it's currently between sunrise and sunset. */
-  isDay: boolean;
-}
-
-export async function fetchDaylight(lat: number, lon: number): Promise<DaylightInfo | null> {
-  try {
-    const url =
-      `https://api.open-meteo.com/v1/forecast` +
-      `?latitude=${lat}&longitude=${lon}` +
-      `&daily=sunrise,sunset&timezone=Europe%2FStockholm&forecast_days=1`;
-    const res = await fetch(url, {
-      next: { revalidate: 3600 },
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) {
-      console.error('[daylight] open-meteo', lat, lon, `HTTP ${res.status}`);
-      return null;
-    }
-    const data = await res.json();
-    const sunrise: string | undefined = data.daily?.sunrise?.[0];
-    const sunset: string | undefined = data.daily?.sunset?.[0];
-    if (!sunrise || !sunset) return null;
-    const now = new Date();
-    const sunriseDate = new Date(sunrise);
-    const sunsetDate = new Date(sunset);
-    const isDay = now >= sunriseDate && now < sunsetDate;
-    let remainingMinutes = 0;
-    if (now < sunriseDate) {
-      remainingMinutes = Math.round((sunsetDate.getTime() - sunriseDate.getTime()) / 60000);
-    } else if (isDay) {
-      remainingMinutes = Math.round((sunsetDate.getTime() - now.getTime()) / 60000);
-    }
-    return { sunrise, sunset, remainingMinutes, isDay };
-  } catch (e) {
-    console.error('[daylight] open-meteo', lat, lon, e instanceof Error ? e.message : String(e));
-    return null;
-  }
 }
 
 /**

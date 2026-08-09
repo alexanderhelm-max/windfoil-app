@@ -5,6 +5,7 @@ import {
   getCondition,
   getGustLevel,
   headingToCompass,
+  WindSector,
 } from './wind-utils';
 
 // Plain text labels — avoiding emojis that older platforms render as � (mojibake).
@@ -19,9 +20,10 @@ export function formatSpotMessage(
   spotName: string,
   description: string,
   current: VivaObservation,
-  appUrl: string
+  appUrl: string,
+  goodSectors?: WindSector[]
 ): string {
-  const condition = getCondition(current.avgWind, current.heading);
+  const condition = getCondition(current.avgWind, current.heading, goodSectors);
   const gustLevel = getGustLevel(current.avgWind, current.gust);
   const compass = headingToCompass(current.heading);
   const lines = [
@@ -104,7 +106,8 @@ export function getAppUrl(): string {
 // The list is encoded as a compact JSON tuple array in a base64url query
 // param, so sharing needs no backend: the recipient's browser decodes it and
 // offers an import. Tuple order: [id, name, description, vivaId, smhiObsId,
-// holfuyId, lat, lon].
+// holfuyId, lat, lon, goodSectors?, sheltered?]. Trailing elements were added
+// later, so decoding tolerates their absence.
 
 import type { Spot } from './spots';
 
@@ -117,6 +120,8 @@ type SpotTuple = [
   number | null,
   number,
   number,
+  { from: number; to: number }[]?,
+  boolean?,
 ];
 
 export function encodeSpotsToParam(spots: Spot[]): string {
@@ -129,6 +134,8 @@ export function encodeSpotsToParam(spots: Spot[]): string {
     s.holfuyId ?? null,
     s.lat,
     s.lon,
+    s.goodSectors,
+    s.sheltered,
   ]);
   const json = JSON.stringify(compact);
   // btoa only handles latin-1; round-trip through UTF-8 bytes for å/ä/ö.
@@ -138,6 +145,23 @@ export function encodeSpotsToParam(spots: Spot[]): string {
 
 export function buildShareSpotsUrl(spots: Spot[]): string {
   return `${getAppUrl()}/?spots=${encodeSpotsToParam(spots)}`;
+}
+
+/** Sectors arrive from a URL, so every bound is checked before it can affect
+ *  how a spot is graded. */
+function parseSectors(v: unknown): { from: number; to: number }[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out = v
+    .filter(
+      (s): s is { from: number; to: number } =>
+        !!s &&
+        typeof s === 'object' &&
+        typeof (s as { from?: unknown }).from === 'number' &&
+        typeof (s as { to?: unknown }).to === 'number'
+    )
+    .map((s) => ({ from: ((s.from % 360) + 360) % 360, to: ((s.to % 360) + 360) % 360 }))
+    .slice(0, 8);
+  return out.length > 0 ? out : undefined;
 }
 
 /** Decode a shared spot list. Returns null on any malformed input —
@@ -151,7 +175,8 @@ export function decodeSpotsFromParam(param: string): Spot[] | null {
     const out: Spot[] = [];
     for (const t of parsed.slice(0, 50)) {
       if (!Array.isArray(t) || t.length < 8) continue;
-      const [id, name, description, vivaId, smhiObsId, holfuyId, lat, lon] = t as unknown[];
+      const [id, name, description, vivaId, smhiObsId, holfuyId, lat, lon, sectors, sheltered] =
+        t as unknown[];
       if (typeof id !== 'string' || typeof name !== 'string') continue;
       if (typeof lat !== 'number' || typeof lon !== 'number') continue;
       if (lat < -90 || lat > 90 || lon < -180 || lon > 180) continue;
@@ -165,6 +190,8 @@ export function decodeSpotsFromParam(param: string): Spot[] | null {
         holfuyId: num(holfuyId),
         lat,
         lon,
+        goodSectors: parseSectors(sectors),
+        ...(sheltered === true ? { sheltered: true } : {}),
       });
     }
     return out.length > 0 ? out : null;

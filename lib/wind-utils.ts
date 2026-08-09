@@ -2,12 +2,36 @@ export type ConditionLevel = 'too-little' | 'ok' | 'great' | 'crazy';
 export type GustLevel = 'smooth' | 'moderate' | 'gusty';
 export type TrendDirection = 'building' | 'steady' | 'dropping';
 
-export function isGoodWindDirection(heading: number): boolean {
-  return heading >= 180 && heading <= 315;
+export interface WindSector {
+  /** Degrees the wind blows FROM, inclusive. Wraps when from > to. */
+  from: number;
+  to: number;
 }
 
-export function getCondition(windSpeed: number, heading: number): ConditionLevel {
-  const offset = isGoodWindDirection(heading) ? 0 : 1;
+/**
+ * Is the wind coming from a direction this spot works in?
+ *
+ * Spots with no sectors configured return true: their geometry is unknown, and
+ * a single rule can't describe a harbour, an open beach and an island channel
+ * at once. Unknown means "don't penalise", not "assume bad".
+ */
+export function isGoodWindDirection(heading: number, sectors?: WindSector[]): boolean {
+  if (!sectors || sectors.length === 0) return true;
+  const h = ((heading % 360) + 360) % 360;
+  return sectors.some(({ from, to }) => (from <= to ? h >= from && h <= to : h >= from || h <= to));
+}
+
+/**
+ * Wind off a spot's working sectors needs 1 m/s more to reach each level —
+ * cross-shore or offshore wind is choppier and less usable at the same speed.
+ * Spots without sectors are graded on speed alone.
+ */
+export function getCondition(
+  windSpeed: number,
+  heading: number,
+  sectors?: WindSector[]
+): ConditionLevel {
+  const offset = isGoodWindDirection(heading, sectors) ? 0 : 1;
   if (windSpeed < 4 + offset) return 'too-little';
   if (windSpeed < 6 + offset) return 'ok';
   if (windSpeed <= 13 + offset) return 'great';
