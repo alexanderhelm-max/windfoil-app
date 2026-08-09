@@ -16,7 +16,7 @@ import {
 import { SmhiObsHistory, ForecastPoint } from '@/lib/smhi';
 
 interface WindTimelineProps {
-  stationName: string;
+  spotName: string;
   history: SmhiObsHistory | null;
   forecast: ForecastPoint[];
   /** Second forecast opinion (SMHI point forecast) rendered alongside the primary */
@@ -71,7 +71,7 @@ function formatTooltipTime(epochMs: number): string {
 }
 
 export default function WindTimeline({
-  stationName,
+  spotName,
   history,
   forecast,
   forecastSmhi = [],
@@ -183,7 +183,7 @@ export default function WindTimeline({
   if (allData.length === 0) {
     return (
       <div className="bg-slate-800 rounded-xl p-6 text-center text-slate-400">
-        No data available for {stationName}
+        No data available for {spotName}
       </div>
     );
   }
@@ -192,7 +192,7 @@ export default function WindTimeline({
     <div className="bg-slate-800 rounded-xl p-4">
       <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
         <h3 className="text-lg font-semibold text-slate-200 flex items-center gap-2 flex-wrap">
-          {stationName} — Wind Timeline
+          {spotName} — Wind Timeline
           {!history || (history.windSpeed.length === 0 && history.gust.length === 0) ? null : historyIsModelled ? (
             <span
               className="text-xs font-normal px-2 py-0.5 rounded-full bg-slate-700 text-slate-400"

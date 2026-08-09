@@ -29,9 +29,9 @@ function avgBearing(dirs: number[]): number {
   return (a + 360) % 360;
 }
 
-interface StationForecast {
-  stationId: string;
-  stationName: string;
+interface SpotForecast {
+  spotId: string;
+  spotName: string;
   current: VivaObservation | null;
   forecast: ForecastPoint[];
   /** Last-hour measured trend; only meaningful for the "right now" ranking */
@@ -39,13 +39,13 @@ interface StationForecast {
 }
 
 interface GoWindowProps {
-  stationForecasts: StationForecast[];
-  onStationSelect?: (stationId: string) => void;
+  spotForecasts: SpotForecast[];
+  onSpotSelect?: (spotId: string) => void;
 }
 
-interface RankedStation {
-  stationId: string;
-  stationName: string;
+interface RankedSpot {
+  spotId: string;
+  spotName: string;
   start: Date;
   end: Date;
   avgWindSpeed: number;
@@ -80,12 +80,12 @@ const conditionRank: Record<ConditionLevel, number> = {
 };
 
 function findBestWindowInRange(
-  stationId: string,
-  stationName: string,
+  spotId: string,
+  spotName: string,
   forecast: ForecastPoint[],
   startHours: number,
   endHours: number
-): RankedStation | null {
+): RankedSpot | null {
   if (forecast.length === 0) return null;
   const now = Date.now();
   const start = now + startHours * 3600 * 1000;
@@ -154,8 +154,8 @@ function findBestWindowInRange(
   const best = scored[0];
 
   return {
-    stationId,
-    stationName,
+    spotId,
+    spotName,
     start: best.start,
     end: best.end,
     avgWindSpeed: best.avgSpeed,
@@ -169,10 +169,10 @@ function findBestWindowInRange(
   };
 }
 
-function rank(stationForecasts: StationForecast[], startHours: number, endHours: number): RankedStation[] {
-  const ranked = stationForecasts
-    .map((sf) => findBestWindowInRange(sf.stationId, sf.stationName, sf.forecast, startHours, endHours))
-    .filter((r): r is RankedStation => r !== null);
+function rank(spotForecasts: SpotForecast[], startHours: number, endHours: number): RankedSpot[] {
+  const ranked = spotForecasts
+    .map((sf) => findBestWindowInRange(sf.spotId, sf.spotName, sf.forecast, startHours, endHours))
+    .filter((r): r is RankedSpot => r !== null);
   // Sort by condition rank, then avg wind speed, then duration, then less gustiness
   ranked.sort((a, b) => {
     const cd = conditionRank[b.condition] - conditionRank[a.condition];
@@ -187,20 +187,20 @@ function rank(stationForecasts: StationForecast[], startHours: number, endHours:
 }
 
 /**
- * Rank stations by their CURRENT measured (or nowcast) conditions.
+ * Rank spots by their CURRENT measured (or nowcast) conditions.
  * durationHours is set to 0 to signal "right now" in the UI.
  */
-function rankNow(stationForecasts: StationForecast[]): RankedStation[] {
+function rankNow(spotForecasts: SpotForecast[]): RankedSpot[] {
   const now = new Date();
-  const ranked: RankedStation[] = stationForecasts
+  const ranked: RankedSpot[] = spotForecasts
     .filter((sf) => sf.current !== null)
     .map((sf) => {
       const c = sf.current!;
       const condition = getCondition(c.avgWind, c.heading);
       const gustRatio = c.avgWind > 0 ? c.gust / c.avgWind : 1;
       return {
-        stationId: sf.stationId,
-        stationName: sf.stationName,
+        spotId: sf.spotId,
+        spotName: sf.spotName,
         start: now,
         end: now,
         avgWindSpeed: c.avgWind,
@@ -233,14 +233,14 @@ function RankedList({
   onItemClick,
 }: {
   title: string;
-  items: RankedStation[];
+  items: RankedSpot[];
   emptyContent?: React.ReactNode;
-  onItemClick?: (stationId: string) => void;
+  onItemClick?: (spotId: string) => void;
 }) {
   const shareMessage = formatRankingMessage(
     title,
     items.map((it) => ({
-      stationName: it.stationName,
+      spotName: it.spotName,
       start: it.start,
       durationHours: it.durationHours,
       avgWindSpeed: it.avgWindSpeed,
@@ -269,7 +269,7 @@ function RankedList({
                 <span className="text-slate-500 font-mono text-xs w-5 shrink-0">#{idx + 1}</span>
                 <div className="flex-1 min-w-0 text-left">
                   <div className="flex items-baseline gap-2 flex-wrap">
-                    <span className="font-semibold text-white truncate">{it.stationName}</span>
+                    <span className="font-semibold text-white truncate">{it.spotName}</span>
                     <span
                       className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
                       style={{
@@ -339,14 +339,14 @@ function RankedList({
             } as const;
 
             return (
-              <li key={`${title}-${it.stationName}-${idx}`}>
+              <li key={`${title}-${it.spotName}-${idx}`}>
                 {clickable ? (
                   <button
                     type="button"
-                    onClick={() => onItemClick?.(it.stationId)}
+                    onClick={() => onItemClick?.(it.spotId)}
                     className="w-full flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer hover:brightness-125 active:brightness-110 transition focus:outline-none focus:ring-2 focus:ring-white/30"
                     style={rowStyle}
-                    title={`Open ${it.stationName} timeline`}
+                    title={`Open ${it.spotName} timeline`}
                   >
                     {inner}
                   </button>
@@ -364,12 +364,12 @@ function RankedList({
   );
 }
 
-export default function GoWindow({ stationForecasts, onStationSelect }: GoWindowProps) {
-  const now = rankNow(stationForecasts);
-  const next6h = rank(stationForecasts, 0, 6);
-  const next24h = rank(stationForecasts, 0, 24);
-  const next48h = rank(stationForecasts, 0, 48);
-  const day3to4 = rank(stationForecasts, 48, 96);
+export default function GoWindow({ spotForecasts, onSpotSelect }: GoWindowProps) {
+  const now = rankNow(spotForecasts);
+  const next6h = rank(spotForecasts, 0, 6);
+  const next24h = rank(spotForecasts, 0, 24);
+  const next48h = rank(spotForecasts, 0, 48);
+  const day3to4 = rank(spotForecasts, 48, 96);
 
   // Pick once per mount so the quote doesn't re-roll on every render
   const calmQuote = useMemo(() => pickRandomQuote(), []);
@@ -399,9 +399,9 @@ export default function GoWindow({ stationForecasts, onStationSelect }: GoWindow
             title="Right now"
             items={now}
             emptyContent={calmEmpty}
-            onItemClick={onStationSelect}
+            onItemClick={onSpotSelect}
           />
-          <RankedList title="Next 6h" items={next6h} onItemClick={onStationSelect} />
+          <RankedList title="Next 6h" items={next6h} onItemClick={onSpotSelect} />
         </div>
       </div>
 

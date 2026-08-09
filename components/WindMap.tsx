@@ -14,7 +14,7 @@ import {
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { VivaObservation } from '@/lib/viva';
-import { Station } from '@/lib/stations';
+import { Spot } from '@/lib/spots';
 import { VIVA_STATIONS_SNAPSHOT, VivaSnapshotStation } from '@/lib/viva-stations.snapshot';
 import TrendBadge, { Trend } from './TrendBadge';
 import {
@@ -25,7 +25,7 @@ import {
 } from '@/lib/wind-utils';
 
 export interface MapEntry {
-  station: Station;
+  spot: Spot;
   current: VivaObservation | null;
   windIsForecast: boolean;
   currentStation: { name: string; distanceKm: number } | null;
@@ -34,11 +34,11 @@ export interface MapEntry {
 
 interface WindMapProps {
   entries: MapEntry[];
-  selectedStationId: string | null;
-  onSelect: (stationId: string) => void;
+  selectedSpotId: string | null;
+  onSelect: (spotId: string) => void;
   onDeselect: () => void;
-  onOpenTimeline: (stationId: string) => void;
-  onAddStation: (station: Station) => void;
+  onOpenTimeline: (spotId: string) => void;
+  onAddSpot: (station: Spot) => void;
   existingIds: Set<string>;
 }
 
@@ -208,7 +208,7 @@ function useDeclutterOffsets(entries: MapEntry[], zoom: number): [number, number
   const map = useMap();
   return useMemo(() => {
     const MIN_GAP = 46;
-    const pts = entries.map((e) => map.latLngToLayerPoint([e.station.lat, e.station.lon]));
+    const pts = entries.map((e) => map.latLngToLayerPoint([e.spot.lat, e.spot.lon]));
     const off: [number, number][] = entries.map(() => [0, 0]);
     for (let i = 0; i < entries.length; i++) {
       for (let j = i + 1; j < entries.length; j++) {
@@ -236,7 +236,7 @@ function useDeclutterOffsets(entries: MapEntry[], zoom: number): [number, number
 function FitBounds({ entries }: { entries: MapEntry[] }) {
   const map = useMap();
   useEffect(() => {
-    const pts = entries.map((e) => [e.station.lat, e.station.lon] as [number, number]);
+    const pts = entries.map((e) => [e.spot.lat, e.spot.lon] as [number, number]);
     if (pts.length === 0) return;
     if (pts.length === 1) {
       map.setView(pts[0], 11);
@@ -252,12 +252,12 @@ function FitBounds({ entries }: { entries: MapEntry[] }) {
 function SpotMarkers({
   entries,
   zoom,
-  selectedStationId,
+  selectedSpotId,
   onSelect,
 }: {
   entries: MapEntry[];
   zoom: number;
-  selectedStationId: string | null;
+  selectedSpotId: string | null;
   onSelect: (id: string) => void;
 }) {
   const offsets = useDeclutterOffsets(entries, zoom);
@@ -265,16 +265,16 @@ function SpotMarkers({
     <>
       {entries.map((e, i) => (
         <Marker
-          key={e.station.id}
-          position={[e.station.lat, e.station.lon]}
-          icon={spotIcon(e, e.station.id === selectedStationId, offsets[i])}
+          key={e.spot.id}
+          position={[e.spot.lat, e.spot.lon]}
+          icon={spotIcon(e, e.spot.id === selectedSpotId, offsets[i])}
           // Windier spots draw above calmer ones so the interesting markers
           // stay on top where spots sit close together.
           zIndexOffset={Math.round((e.current?.avgWind ?? 0) * 10)}
-          eventHandlers={{ click: () => onSelect(e.station.id) }}
+          eventHandlers={{ click: () => onSelect(e.spot.id) }}
         >
           <Tooltip direction="top" offset={[0, -26]}>
-            {e.station.name}
+            {e.spot.name}
           </Tooltip>
         </Marker>
       ))}
@@ -284,11 +284,11 @@ function SpotMarkers({
 
 export default function WindMap({
   entries,
-  selectedStationId,
+  selectedSpotId,
   onSelect,
   onDeselect,
   onOpenTimeline,
-  onAddStation,
+  onAddSpot,
   existingIds,
 }: WindMapProps) {
   const [showViva, setShowViva] = useState(true);
@@ -321,8 +321,8 @@ export default function WindMap({
 
   const center = useMemo<[number, number]>(() => {
     if (entries.length === 0) return [57.7, 11.7];
-    const lat = entries.reduce((s, e) => s + e.station.lat, 0) / entries.length;
-    const lon = entries.reduce((s, e) => s + e.station.lon, 0) / entries.length;
+    const lat = entries.reduce((s, e) => s + e.spot.lat, 0) / entries.length;
+    const lon = entries.reduce((s, e) => s + e.spot.lon, 0) / entries.length;
     return [lat, lon];
   }, [entries]);
 
@@ -332,7 +332,7 @@ export default function WindMap({
     [existingIds]
   );
 
-  const selected = entries.find((e) => e.station.id === selectedStationId) ?? null;
+  const selected = entries.find((e) => e.spot.id === selectedSpotId) ?? null;
 
   /**
    * Only one card shows at a time, so opening a candidate has to drop the
@@ -383,8 +383,8 @@ export default function WindMap({
     [smhiStations, existingIds]
   );
 
-  function addSmhiStation(s: SmhiMapStation) {
-    onAddStation({
+  function addSmhiSpot(s: SmhiMapStation) {
+    onAddSpot({
       id: `smhi-${s.id}`,
       name: s.name,
       description: 'SMHI station',
@@ -397,8 +397,8 @@ export default function WindMap({
     setPendingSmhi(null);
   }
 
-  function addVivaStation(v: VivaSnapshotStation) {
-    onAddStation({
+  function addVivaSpot(v: VivaSnapshotStation) {
+    onAddSpot({
       id: `viva-${v.id}`,
       name: v.name,
       description: 'VIVA station',
@@ -496,7 +496,7 @@ export default function WindMap({
         <SpotMarkers
           entries={entries}
           zoom={zoom}
-          selectedStationId={selectedStationId}
+          selectedSpotId={selectedSpotId}
           onSelect={(id) => {
             setPendingViva(null);
             setPendingSmhi(null);
@@ -534,7 +534,7 @@ export default function WindMap({
           so tapping anything on the map always answers in the same place. */}
       {selected && (
         <InfoCard onClose={onDeselect}>
-          <SpotDetails entry={selected} onOpenTimeline={() => onOpenTimeline(selected.station.id)} />
+          <SpotDetails entry={selected} onOpenTimeline={() => onOpenTimeline(selected.spot.id)} />
         </InfoCard>
       )}
       {!selected && pendingViva && (
@@ -544,7 +544,7 @@ export default function WindMap({
             subtitle={`VIVA station #${pendingViva.id}`}
             avg={liveViva[pendingViva.id]?.avg ?? null}
             dir={liveViva[pendingViva.id]?.dir ?? null}
-            onAdd={() => addVivaStation(pendingViva)}
+            onAdd={() => addVivaSpot(pendingViva)}
           />
         </InfoCard>
       )}
@@ -555,7 +555,7 @@ export default function WindMap({
             subtitle={`SMHI station #${pendingSmhi.id}`}
             avg={pendingSmhi.avg}
             dir={pendingSmhi.dir}
-            onAdd={() => addSmhiStation(pendingSmhi)}
+            onAdd={() => addSmhiSpot(pendingSmhi)}
           />
         </InfoCard>
       )}
@@ -632,7 +632,7 @@ function SpotDetails({ entry, onOpenTimeline }: { entry: MapEntry; onOpenTimelin
 
   return (
     <>
-      <div className="font-semibold text-white text-base pr-6">{entry.station.name}</div>
+      <div className="font-semibold text-white text-base pr-6">{entry.spot.name}</div>
       <div className="flex items-center gap-2 mt-1 mb-3">
         <span
           className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide ${
@@ -649,7 +649,7 @@ function SpotDetails({ entry, onOpenTimeline }: { entry: MapEntry; onOpenTimelin
                   ? ` · ${entry.currentStation.distanceKm.toFixed(0)} km`
                   : ''
               }`
-            : entry.station.description}
+            : entry.spot.description}
         </span>
       </div>
 

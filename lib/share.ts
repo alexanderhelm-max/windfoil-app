@@ -15,8 +15,8 @@ const gustText: Record<'smooth' | 'moderate' | 'gusty', string> = {
   gusty: 'Gusty',
 };
 
-export function formatStationMessage(
-  stationName: string,
+export function formatSpotMessage(
+  spotName: string,
   description: string,
   current: VivaObservation,
   appUrl: string
@@ -25,7 +25,7 @@ export function formatStationMessage(
   const gustLevel = getGustLevel(current.avgWind, current.gust);
   const compass = headingToCompass(current.heading);
   const lines = [
-    `*${stationName}* (${description})`,
+    `*${spotName}* (${description})`,
     `Condition: ${conditionLabels[condition]}`,
     `Wind: ${current.avgWind.toFixed(1)} m/s avg / ${current.gust.toFixed(1)} gust — ${compass} ${current.heading}°`,
     `Gusts: ${gustText[gustLevel]}`,
@@ -42,7 +42,7 @@ export function formatStationMessage(
 }
 
 export interface RankedSpotShare {
-  stationName: string;
+  spotName: string;
   start: Date;
   durationHours: number;
   avgWindSpeed: number;
@@ -73,7 +73,7 @@ export function formatRankingMessage(
   spots.slice(0, 5).forEach((s, i) => {
     const dir = `${headingToCompass(s.avgWindDir)} ${Math.round(s.avgWindDir)}°`;
     lines.push(
-      `${i + 1}. ${s.stationName} [${conditionLabels[s.condition]}] — ${shortTime(s.start)} (${s.durationHours.toFixed(0)}h) — ${dir} — ${s.avgWindSpeed.toFixed(1)}/${s.peakWindSpeed.toFixed(1)} m/s avg/peak`
+      `${i + 1}. ${s.spotName} [${conditionLabels[s.condition]}] — ${shortTime(s.start)} (${s.durationHours.toFixed(0)}h) — ${dir} — ${s.avgWindSpeed.toFixed(1)}/${s.peakWindSpeed.toFixed(1)} m/s avg/peak`
     );
   });
   lines.push('');
@@ -100,15 +100,15 @@ export function getAppUrl(): string {
   return window.location.origin;
 }
 
-// ---- Station-list sharing via URL ----------------------------------------
+// ---- Spot-list sharing via URL ----------------------------------------
 // The list is encoded as a compact JSON tuple array in a base64url query
 // param, so sharing needs no backend: the recipient's browser decodes it and
 // offers an import. Tuple order: [id, name, description, vivaId, smhiObsId,
 // holfuyId, lat, lon].
 
-import type { Station } from './stations';
+import type { Spot } from './spots';
 
-type StationTuple = [
+type SpotTuple = [
   string,
   string,
   string,
@@ -119,8 +119,8 @@ type StationTuple = [
   number,
 ];
 
-export function encodeStationsToParam(stations: Station[]): string {
-  const compact: StationTuple[] = stations.map((s) => [
+export function encodeSpotsToParam(spots: Spot[]): string {
+  const compact: SpotTuple[] = spots.map((s) => [
     s.id,
     s.name,
     s.description,
@@ -136,19 +136,19 @@ export function encodeStationsToParam(stations: Station[]): string {
   return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-export function buildShareSpotsUrl(stations: Station[]): string {
-  return `${getAppUrl()}/?spots=${encodeStationsToParam(stations)}`;
+export function buildShareSpotsUrl(spots: Spot[]): string {
+  return `${getAppUrl()}/?spots=${encodeSpotsToParam(spots)}`;
 }
 
-/** Decode a shared station list. Returns null on any malformed input —
+/** Decode a shared spot list. Returns null on any malformed input —
  *  the param is user-controlled data from a URL, so everything is checked. */
-export function decodeStationsFromParam(param: string): Station[] | null {
+export function decodeSpotsFromParam(param: string): Spot[] | null {
   try {
     const b64 = param.replace(/-/g, '+').replace(/_/g, '/');
     const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
     const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
     if (!Array.isArray(parsed)) return null;
-    const out: Station[] = [];
+    const out: Spot[] = [];
     for (const t of parsed.slice(0, 50)) {
       if (!Array.isArray(t) || t.length < 8) continue;
       const [id, name, description, vivaId, smhiObsId, holfuyId, lat, lon] = t as unknown[];

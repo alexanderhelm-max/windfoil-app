@@ -13,11 +13,11 @@ import {
   ConditionLevel,
   GustLevel,
 } from '@/lib/wind-utils';
-import { formatStationMessage, getAppUrl } from '@/lib/share';
+import { formatSpotMessage, getAppUrl } from '@/lib/share';
 import ShareMenu from './ShareMenu';
 import TrendBadge, { Trend } from './TrendBadge';
 
-interface StationCardProps {
+interface SpotCardProps {
   id: string;
   name: string;
   description: string;
@@ -70,7 +70,7 @@ function formatUpdated(updatedAt: string): string {
   }
 }
 
-export default function StationCard({
+export default function SpotCard({
   id,
   name,
   description,
@@ -83,7 +83,7 @@ export default function StationCard({
   windIsForecast = false,
   currentStation = null,
   daylight,
-}: StationCardProps) {
+}: SpotCardProps) {
   const avgWind = current?.avgWind ?? 0;
   const gust = current?.gust ?? 0;
   const heading = current?.heading ?? 0;
@@ -129,7 +129,7 @@ export default function StationCard({
           )}
           {current && (
             <ShareMenu
-              message={formatStationMessage(name, description, current, getAppUrl())}
+              message={formatSpotMessage(name, description, current, getAppUrl())}
               label={`Share ${name}`}
             />
           )}
@@ -140,13 +140,13 @@ export default function StationCard({
               tabIndex={0}
               onClick={(e) => {
                 e.stopPropagation();
-                if (confirm(`Remove "${name}" from your stations?`)) onRemove(id);
+                if (confirm(`Remove "${name}" from your spots?`)) onRemove(id);
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
                   e.stopPropagation();
-                  if (confirm(`Remove "${name}" from your stations?`)) onRemove(id);
+                  if (confirm(`Remove "${name}" from your spots?`)) onRemove(id);
                 }
               }}
               className="w-7 h-7 flex items-center justify-center rounded-full bg-slate-900/60 text-slate-400 hover:bg-red-900/80 hover:text-white transition cursor-pointer text-sm leading-none"
