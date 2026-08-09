@@ -2,17 +2,17 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import StationCard from './StationCard';
+import SpotCard from './SpotCard';
 import WindTimeline from './WindTimeline';
 import GoWindow from './GoWindow';
 import AlertBanner from './AlertBanner';
-import AddStationDialog from './AddStationDialog';
+import AddSpotDialog from './AddSpotDialog';
 import { VivaObservation } from '@/lib/viva';
 import { SmhiObsHistory, ForecastPoint, DaylightInfo, ForecastSource } from '@/lib/smhi';
 import { getCondition, getHourTrend } from '@/lib/wind-utils';
-import { Station, DEFAULT_STATIONS } from '@/lib/stations';
-import { loadStations, saveStations, resetStations } from '@/lib/station-store';
-import { buildShareSpotsUrl, decodeStationsFromParam, copyToClipboard } from '@/lib/share';
+import { Spot, DEFAULT_SPOTS } from '@/lib/spots';
+import { loadSpots, saveSpots, resetSpots } from '@/lib/spot-store';
+import { buildShareSpotsUrl, decodeSpotsFromParam, copyToClipboard } from '@/lib/share';
 
 // Leaflet touches window at import time, so the map can only load client-side.
 const WindMap = dynamic(() => import('./WindMap'), {
@@ -52,42 +52,42 @@ function formatRefreshTime(epochMs: number): string {
   });
 }
 
-function buildUrl(s: Station): string {
+function buildUrl(s: Spot): string {
   const params = new URLSearchParams();
   if (s.vivaId != null) params.set('vivaId', String(s.vivaId));
   if (s.smhiObsId != null) params.set('smhiObsId', String(s.smhiObsId));
   if (s.holfuyId != null) params.set('holfuyId', String(s.holfuyId));
   params.set('lat', String(s.lat));
   params.set('lon', String(s.lon));
-  return `/api/station-data?${params.toString()}`;
+  return `/api/spot-data?${params.toString()}`;
 }
 
 export default function Dashboard() {
-  const [stations, setStations] = useState<Station[]>([]);
+  const [spots, setSpots] = useState<Spot[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [data, setData] = useState<Record<string, FetchedData>>({});
   const [dataLoaded, setDataLoaded] = useState(false);
-  const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
+  const [selectedSpotId, setSelectedStationId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null);
-  const [pendingImport, setPendingImport] = useState<Station[] | null>(null);
+  const [pendingImport, setPendingImport] = useState<Spot[] | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
   const [view, setView] = useState<'list' | 'map'>('list');
-  const stationRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const spotRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const skipScrollRef = useRef(false);
 
-  // Hydrate from localStorage, and pick up a shared station list from the
+  // Hydrate from localStorage, and pick up a shared spot list from the
   // URL (?spots=...) — offered as an import rather than applied silently.
   useEffect(() => {
-    const loaded = loadStations();
-    setStations(loaded);
+    const loaded = loadSpots();
+    setSpots(loaded);
     setHydrated(true);
     if (localStorage.getItem(VIEW_KEY) === 'map') setView('map');
 
     const param = new URLSearchParams(window.location.search).get('spots');
     if (param) {
-      const shared = decodeStationsFromParam(param);
+      const shared = decodeSpotsFromParam(param);
       const existing = new Set(loaded.map((s) => s.id));
       const fresh = shared?.filter((s) => !existing.has(s.id)) ?? [];
       if (fresh.length > 0) setPendingImport(fresh);
@@ -96,7 +96,7 @@ export default function Dashboard() {
     }
   }, []);
 
-  // Fetch data when stations change, refresh every 15 minutes,
+  // Fetch data when spots change, refresh every 15 minutes,
   // and re-fetch when the page becomes visible again (iOS home-screen apps
   // suspend timers while backgrounded).
   useEffect(() => {
@@ -108,7 +108,7 @@ export default function Dashboard() {
       if (showLoading) setDataLoaded(false);
       lastFetchAt = Date.now();
       const entries = await Promise.all(
-        stations.map(async (s) => {
+        spots.map(async (s) => {
           try {
             const res = await fetch(buildUrl(s));
             if (!res.ok) return [
@@ -147,32 +147,32 @@ export default function Dashboard() {
       clearInterval(intervalId);
       document.removeEventListener('visibilitychange', handleVisible);
     };
-  }, [stations, hydrated]);
+  }, [spots, hydrated]);
 
-  const updateStations = useCallback((next: Station[]) => {
-    saveStations(next);
-    setStations(next);
+  const updateSpots = useCallback((next: Spot[]) => {
+    saveSpots(next);
+    setSpots(next);
   }, []);
 
   const handleAdd = useCallback(
-    (station: Station) => {
-      updateStations([...stations, station]);
+    (spot: Spot) => {
+      updateSpots([...spots, spot]);
     },
-    [stations, updateStations]
+    [spots, updateSpots]
   );
 
   const handleRemove = useCallback(
     (id: string) => {
-      updateStations(stations.filter((s) => s.id !== id));
-      if (selectedStationId === id) setSelectedStationId(null);
+      updateSpots(spots.filter((s) => s.id !== id));
+      if (selectedSpotId === id) setSelectedStationId(null);
     },
-    [stations, updateStations, selectedStationId]
+    [spots, updateSpots, selectedSpotId]
   );
 
   const handleReset = useCallback(() => {
-    if (!confirm('Reset to default stations? Your custom list will be lost.')) return;
-    const defaults = resetStations();
-    setStations([...defaults]);
+    if (!confirm('Reset to default spots? Your custom list will be lost.')) return;
+    const defaults = resetSpots();
+    setSpots([...defaults]);
     setSelectedStationId(null);
   }, []);
 
@@ -182,7 +182,7 @@ export default function Dashboard() {
   }, []);
 
   const handleShareSpots = useCallback(async () => {
-    const url = buildShareSpotsUrl(stations);
+    const url = buildShareSpotsUrl(spots);
     // Native share sheet on mobile; clipboard on desktop.
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
@@ -196,27 +196,27 @@ export default function Dashboard() {
       setShareCopied(true);
       setTimeout(() => setShareCopied(false), 2500);
     }
-  }, [stations]);
+  }, [spots]);
 
   const handleImportShared = useCallback(() => {
     if (!pendingImport) return;
-    updateStations([...stations, ...pendingImport]);
+    updateSpots([...spots, ...pendingImport]);
     setPendingImport(null);
-  }, [pendingImport, stations, updateStations]);
+  }, [pendingImport, spots, updateSpots]);
 
-  const handleSelectStation = (stationId: string) => {
-    if (selectedStationId === stationId) {
+  const handleSelectSpot = (spotId: string) => {
+    if (selectedSpotId === spotId) {
       setSelectedStationId(null);
       return;
     }
-    setSelectedStationId(stationId);
+    setSelectedStationId(spotId);
   };
 
-  // When a station is selected (from card click or from GoWindow ranking),
+  // When a spot is selected (from card click or from GoWindow ranking),
   // smooth-scroll the bottom timeline section into view so the user doesn't
   // have to hunt for it.
   useEffect(() => {
-    if (!selectedStationId) return;
+    if (!selectedSpotId) return;
     // Selecting from the map only opens the marker popup; scrolling away from
     // the map there would be jarring, so the popup's button scrolls instead.
     if (skipScrollRef.current) {
@@ -227,30 +227,30 @@ export default function Dashboard() {
       timelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 50);
     return () => window.clearTimeout(id);
-  }, [selectedStationId]);
+  }, [selectedSpotId]);
 
-  const handleMapSelect = useCallback((stationId: string) => {
+  const handleMapSelect = useCallback((spotId: string) => {
     skipScrollRef.current = true;
-    setSelectedStationId(stationId);
+    setSelectedStationId(spotId);
   }, []);
 
   const handleMapDeselect = useCallback(() => setSelectedStationId(null), []);
 
-  const handleOpenTimeline = useCallback((stationId: string) => {
+  const handleOpenTimeline = useCallback((spotId: string) => {
     skipScrollRef.current = false;
-    setSelectedStationId(stationId);
+    setSelectedStationId(spotId);
     // Same id as already selected wouldn't re-run the effect above, so scroll here.
     window.setTimeout(() => {
       timelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 50);
   }, []);
 
-  const handleSelectFromRanking = useCallback((stationId: string) => {
-    setSelectedStationId(stationId);
+  const handleSelectFromRanking = useCallback((spotId: string) => {
+    setSelectedStationId(spotId);
   }, []);
 
-  // Build effectiveStations: synthesize current from forecast for stations with no live data
-  const effectiveStations = stations.map((s) => {
+  // Build effectiveSpots: synthesize current from forecast for spots with no live data
+  const effectiveSpots = spots.map((s) => {
     const d = data[s.id];
     // A full hour of readings, so the card's trend is a real one-hour slope
     // rather than whatever the last few samples happened to do.
@@ -292,7 +292,7 @@ export default function Dashboard() {
       current = next;
     }
     return {
-      station: s,
+      spot: s,
       current,
       history: d?.history ?? null,
       historyIsModelled: d?.historyIsModelled ?? false,
@@ -310,23 +310,23 @@ export default function Dashboard() {
     };
   });
 
-  const selectedEntry = effectiveStations.find((e) => e.station.id === selectedStationId) ?? null;
+  const selectedEntry = effectiveSpots.find((e) => e.spot.id === selectedSpotId) ?? null;
 
-  const greatStations = effectiveStations
+  const greatSpots = effectiveSpots
     .filter((e) => {
       if (!e.current) return false;
       const condition = getCondition(e.current.avgWind, e.current.heading);
       return condition === 'great' || condition === 'crazy';
     })
     .map((e) => ({
-      name: e.station.name,
+      name: e.spot.name,
       condition: getCondition(e.current!.avgWind, e.current!.heading) as 'great' | 'crazy',
       avgWind: e.current!.avgWind,
     }));
 
-  const stationForecasts = effectiveStations.map((e) => ({
-    stationId: e.station.id,
-    stationName: e.station.name,
+  const spotForecasts = effectiveSpots.map((e) => ({
+    spotId: e.spot.id,
+    spotName: e.spot.name,
     current: e.current,
     forecast: e.forecast,
     trend: e.trend,
@@ -335,7 +335,7 @@ export default function Dashboard() {
   // Surface forecast status:
   //   - outage: all forecasts empty AND at least one error → both providers down
   //   - fallback: forecasts populated but coming from SMHI (Open-Meteo down, SMHI saved us)
-  const stationsWithData = stations.filter((s) => data[s.id]);
+  const stationsWithData = spots.filter((s) => data[s.id]);
   const forecastErrors = stationsWithData
     .map((s) => data[s.id]?.diag?.forecast)
     .filter((e): e is string => !!e);
@@ -349,14 +349,14 @@ export default function Dashboard() {
     !forecastOutage &&
     stationsWithData.some((s) => data[s.id]?.forecastSource === 'smhi');
 
-  const existingIds = new Set(stations.map((s) => s.id));
+  const existingIds = new Set(spots.map((s) => s.id));
   const isDefault =
-    stations.length === DEFAULT_STATIONS.length &&
-    stations.every((s, i) => s.id === DEFAULT_STATIONS[i].id);
+    spots.length === DEFAULT_SPOTS.length &&
+    spots.every((s, i) => s.id === DEFAULT_SPOTS[i].id);
 
   if (!hydrated) {
     return (
-      <div className="max-w-6xl mx-auto px-4 py-6 text-slate-400 text-sm">Loading stations...</div>
+      <div className="max-w-6xl mx-auto px-4 py-6 text-slate-400 text-sm">Loading spots...</div>
     );
   }
 
@@ -365,7 +365,7 @@ export default function Dashboard() {
       {/* Toolbar */}
       <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
         <div className="flex items-baseline gap-3 flex-wrap">
-          <h2 className="text-xl font-bold text-slate-200">Stations</h2>
+          <h2 className="text-xl font-bold text-slate-200">Spots</h2>
           <div className="inline-flex rounded-lg bg-slate-900/60 p-0.5 border border-slate-700 self-center">
             {(['list', 'map'] as const).map((v) => (
               <button
@@ -398,7 +398,7 @@ export default function Dashboard() {
           <button
             onClick={handleShareSpots}
             className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium rounded-md transition"
-            title="Share your station list as a link — recipients get an import prompt."
+            title="Share your spot list as a link — recipients get an import prompt."
           >
             {shareCopied ? 'Link copied!' : 'Share spots'}
           </button>
@@ -406,7 +406,7 @@ export default function Dashboard() {
             onClick={() => setShowAdd(true)}
             className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-md transition"
           >
-            + Add station
+            + Add spot
           </button>
         </div>
       </div>
@@ -438,18 +438,18 @@ export default function Dashboard() {
           banners and rankings, which stay available by scrolling. */}
       {view === 'map' && (
         <WindMap
-          entries={effectiveStations.map((e) => ({
-            station: e.station,
+          entries={effectiveSpots.map((e) => ({
+            spot: e.spot,
             current: e.current,
             windIsForecast: e.windIsForecast,
             currentStation: e.currentStation,
             trend: e.trend,
           }))}
-          selectedStationId={selectedStationId}
+          selectedSpotId={selectedSpotId}
           onSelect={handleMapSelect}
           onDeselect={handleMapDeselect}
           onOpenTimeline={handleOpenTimeline}
-          onAddStation={handleAdd}
+          onAddSpot={handleAdd}
           existingIds={existingIds}
         />
       )}
@@ -458,7 +458,7 @@ export default function Dashboard() {
         <div className="bg-amber-900/30 border border-amber-700/60 rounded-xl px-4 py-3 mb-4 text-sm text-amber-200">
           <span className="font-semibold">Forecast unavailable.</span> Both Open-Meteo and the
           SMHI fallback failed ({forecastOutage}), so the Plan-ahead rankings and forecast-only
-          stations (e.g. Marstrand, Lysekil) have no data. Live conditions from VIVA stations are
+          spots (e.g. Marstrand, Lysekil) have no data. Live conditions from VIVA spots are
           unaffected.
         </div>
       )}
@@ -468,10 +468,10 @@ export default function Dashboard() {
         </div>
       )}
 
-      <AlertBanner greatStations={greatStations} />
+      <AlertBanner greatSpots={greatSpots} />
 
       {dataLoaded && (
-        <GoWindow stationForecasts={stationForecasts} onStationSelect={handleSelectFromRanking} />
+        <GoWindow spotForecasts={spotForecasts} onSpotSelect={handleSelectFromRanking} />
       )}
       {!dataLoaded && (
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 mb-6 text-slate-400 text-sm">
@@ -480,35 +480,35 @@ export default function Dashboard() {
       )}
 
       {view === 'list' &&
-        (stations.length === 0 ? (
+        (spots.length === 0 ? (
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-8 text-center text-slate-400">
-          <p className="mb-3">No stations yet.</p>
+          <p className="mb-3">No spots yet.</p>
           <button
             onClick={() => setShowAdd(true)}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-md"
           >
-            + Add your first station
+            + Add your first spot
           </button>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-8">
-          {effectiveStations.map((e) => (
+          {effectiveSpots.map((e) => (
             <div
-              key={e.station.id}
+              key={e.spot.id}
               ref={(el) => {
-                stationRefs.current[e.station.id] = el;
+                spotRefs.current[e.spot.id] = el;
               }}
               className="scroll-mt-20"
             >
-              <StationCard
-                id={e.station.id}
-                name={e.station.name}
-                description={e.station.description}
+              <SpotCard
+                id={e.spot.id}
+                name={e.spot.name}
+                description={e.spot.description}
                 current={e.current}
                 history={e.history}
                 trend={e.trend}
-                isSelected={selectedStationId === e.station.id}
-                onClick={() => handleSelectStation(e.station.id)}
+                isSelected={selectedSpotId === e.spot.id}
+                onClick={() => handleSelectSpot(e.spot.id)}
                 onRemove={handleRemove}
                 airTempIsForecast={e.airTempIsForecast}
                 windIsForecast={e.windIsForecast}
@@ -526,12 +526,12 @@ export default function Dashboard() {
           <p className="text-slate-500 text-sm mb-4">
             {view === 'map'
               ? 'Tap a spot on the map to see its 24h history and 96h forecast.'
-              : 'Click a station card above to see its 24h history and 96h forecast.'}
+              : 'Click a spot card above to see its 24h history and 96h forecast.'}
           </p>
         )}
         {selectedEntry && (
           <WindTimeline
-            stationName={selectedEntry.station.name}
+            spotName={selectedEntry.spot.name}
             history={selectedEntry.history}
             forecast={selectedEntry.forecast}
             historyIsModelled={selectedEntry.historyIsModelled}
@@ -543,7 +543,7 @@ export default function Dashboard() {
       </section>
 
       {showAdd && (
-        <AddStationDialog
+        <AddSpotDialog
           existingIds={existingIds}
           onAdd={handleAdd}
           onClose={() => setShowAdd(false)}

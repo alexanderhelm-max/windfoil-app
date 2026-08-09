@@ -1,4 +1,4 @@
-export interface Station {
+export interface Spot {
   id: string;
   name: string;
   description: string;
@@ -11,7 +11,7 @@ export interface Station {
   lon: number;
 }
 
-export const DEFAULT_STATIONS: Station[] = [
+export const DEFAULT_SPOTS: Spot[] = [
   {
     id: 'viva-220',
     name: 'Nidingen',

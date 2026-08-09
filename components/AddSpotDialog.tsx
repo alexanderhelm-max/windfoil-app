@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Station } from '@/lib/stations';
+import { Spot } from '@/lib/spots';
 
 interface RemoteStation {
   id: number;
@@ -14,7 +14,7 @@ type Tab = 'viva' | 'smhi' | 'custom';
 
 interface AddStationDialogProps {
   existingIds: Set<string>;
-  onAdd: (station: Station) => void;
+  onAdd: (spot: Spot) => void;
   onClose: () => void;
 }
 
@@ -29,7 +29,7 @@ function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number): num
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-export default function AddStationDialog({ existingIds, onAdd, onClose }: AddStationDialogProps) {
+export default function AddSpotDialog({ existingIds, onAdd, onClose }: AddStationDialogProps) {
   const [tab, setTab] = useState<Tab>('viva');
   const [vivaList, setVivaList] = useState<RemoteStation[] | null>(null);
   const [smhiList, setSmhiList] = useState<RemoteStation[] | null>(null);
@@ -104,17 +104,17 @@ export default function AddStationDialog({ existingIds, onAdd, onClose }: AddSta
     return smhiList.filter((s) => s.name.toLowerCase().includes(q)).slice(0, 200);
   }, [smhiList, search]);
 
-  function commit(station: Station) {
-    if (existingIds.has(station.id)) {
-      setError(`Station "${station.id}" is already in your list.`);
+  function commit(spot: Spot) {
+    if (existingIds.has(spot.id)) {
+      setError(`Spot "${spot.id}" is already in your list.`);
       return;
     }
-    if (station.lat < -90 || station.lat > 90 || station.lon < -180 || station.lon > 180) {
+    if (spot.lat < -90 || spot.lat > 90 || spot.lon < -180 || spot.lon > 180) {
       setError('Latitude must be in [-90,90] and longitude in [-180,180].');
       return;
     }
     setError(null);
-    onAdd(station);
+    onAdd(spot);
     onClose();
   }
 
@@ -190,7 +190,7 @@ export default function AddStationDialog({ existingIds, onAdd, onClose }: AddSta
         aria-modal="true"
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-slate-700">
-          <h2 className="text-lg font-semibold text-white">Add station</h2>
+          <h2 className="text-lg font-semibold text-white">Add spot</h2>
           <button
             onClick={onClose}
             className="text-slate-400 hover:text-white text-2xl leading-none"
@@ -239,7 +239,7 @@ export default function AddStationDialog({ existingIds, onAdd, onClose }: AddSta
                     className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-blue-400"
                   />
                   {vivaList === null ? (
-                    <p className="text-slate-400 text-sm">Loading stations...</p>
+                    <p className="text-slate-400 text-sm">Loading VIVA stations...</p>
                   ) : (
                     <div className="max-h-80 overflow-y-auto rounded-md border border-slate-700 divide-y divide-slate-700">
                       {filteredViva.length === 0 && (
@@ -336,7 +336,7 @@ export default function AddStationDialog({ existingIds, onAdd, onClose }: AddSta
                     onClick={addViva}
                     className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-md transition"
                   >
-                    Add station
+                    Add spot
                   </button>
                 </div>
               )}
@@ -353,7 +353,7 @@ export default function AddStationDialog({ existingIds, onAdd, onClose }: AddSta
                 className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-blue-400"
               />
               {smhiList === null ? (
-                <p className="text-slate-400 text-sm">Loading stations...</p>
+                <p className="text-slate-400 text-sm">Loading SMHI stations...</p>
               ) : (
                 <div className="max-h-80 overflow-y-auto rounded-md border border-slate-700 divide-y divide-slate-700">
                   {filteredSmhi.length === 0 && (
@@ -380,7 +380,7 @@ export default function AddStationDialog({ existingIds, onAdd, onClose }: AddSta
                 disabled={!pickedSmhi}
                 className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-medium rounded-md transition"
               >
-                Add station
+                Add spot
               </button>
             </div>
           )}
@@ -444,7 +444,7 @@ export default function AddStationDialog({ existingIds, onAdd, onClose }: AddSta
                 onClick={addCustom}
                 className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-md transition"
               >
-                Add station
+                Add spot
               </button>
             </div>
           )}

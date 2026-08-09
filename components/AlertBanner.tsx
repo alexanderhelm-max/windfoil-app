@@ -3,28 +3,28 @@
 import { useEffect, useRef } from 'react';
 import { ConditionLevel, conditionLabels } from '@/lib/wind-utils';
 
-interface StationAlert {
+interface SpotAlert {
   name: string;
   condition: ConditionLevel;
   avgWind: number;
 }
 
 interface AlertBannerProps {
-  greatStations: StationAlert[];
+  greatSpots: SpotAlert[];
 }
 
-export default function AlertBanner({ greatStations }: AlertBannerProps) {
+export default function AlertBanner({ greatSpots }: AlertBannerProps) {
   const notifiedRef = useRef(false);
 
   useEffect(() => {
-    if (greatStations.length === 0 || notifiedRef.current) return;
+    if (greatSpots.length === 0 || notifiedRef.current) return;
     notifiedRef.current = true;
 
     if (!('Notification' in window)) return;
 
     const sendNotification = () => {
-      const stationList = greatStations.map((s) => `${s.name}: ${s.avgWind.toFixed(1)} m/s`).join(', ');
-      const body = `${greatStations.length} station${greatStations.length > 1 ? 's' : ''} with great conditions: ${stationList}`;
+      const spotList = greatSpots.map((s) => `${s.name}: ${s.avgWind.toFixed(1)} m/s`).join(', ');
+      const body = `${greatSpots.length} spot${greatSpots.length > 1 ? "s" : ""} with great conditions: ${spotList}`;
       try {
         new Notification('Wind Foil Conditions', { body, icon: '/favicon.ico' });
       } catch {
@@ -39,9 +39,9 @@ export default function AlertBanner({ greatStations }: AlertBannerProps) {
         if (permission === 'granted') sendNotification();
       });
     }
-  }, [greatStations]);
+  }, [greatSpots]);
 
-  if (greatStations.length === 0) return null;
+  if (greatSpots.length === 0) return null;
 
   return (
     <div className="bg-green-900/40 border border-green-700 rounded-xl px-4 py-3 mb-4 flex items-start gap-3">
@@ -51,7 +51,7 @@ export default function AlertBanner({ greatStations }: AlertBannerProps) {
           Great conditions right now!
         </p>
         <p className="text-green-400/80 text-sm">
-          {greatStations.map((s) => (
+          {greatSpots.map((s) => (
             <span key={s.name} className="inline-block mr-3">
               <strong>{s.name}</strong>:{' '}
               <span style={{ color: '#22c55e' }}>{conditionLabels[s.condition]}</span>{' '}
