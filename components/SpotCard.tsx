@@ -12,6 +12,7 @@ import {
   getWingHint,
   ConditionLevel,
   GustLevel,
+  WindSector,
 } from '@/lib/wind-utils';
 import { formatSpotMessage, getAppUrl } from '@/lib/share';
 import ShareMenu from './ShareMenu';
@@ -28,12 +29,16 @@ interface SpotCardProps {
   isSelected: boolean;
   onClick: () => void;
   onRemove?: (id: string) => void;
+  /** Opens the compass editor for this spot's working directions */
+  onEditSectors?: (id: string) => void;
   /** True when the air temp came from forecast rather than a real sensor */
   airTempIsForecast?: boolean;
   /** True when the wind values came from forecast (e.g. station with no wind sensor) */
   windIsForecast?: boolean;
   /** Set when the live reading came from a nearby station rather than this spot's own */
   currentStation?: { name: string; distanceKm: number } | null;
+  /** Compass sectors this spot works in; undefined means grade on speed alone */
+  goodSectors?: WindSector[];
   daylight?: DaylightInfo | null;
 }
 
@@ -79,16 +84,18 @@ export default function SpotCard({
   isSelected,
   onClick,
   onRemove,
+  onEditSectors,
   airTempIsForecast = false,
   windIsForecast = false,
   currentStation = null,
+  goodSectors,
   daylight,
 }: SpotCardProps) {
   const avgWind = current?.avgWind ?? 0;
   const gust = current?.gust ?? 0;
   const heading = current?.heading ?? 0;
 
-  const condition: ConditionLevel = getCondition(avgWind, heading);
+  const condition: ConditionLevel = getCondition(avgWind, heading, goodSectors);
   const gustLevel: GustLevel = getGustLevel(avgWind, gust);
   const compassDir = headingToCompass(heading);
   const condColor = conditionColors[condition];
@@ -129,9 +136,35 @@ export default function SpotCard({
           )}
           {current && (
             <ShareMenu
-              message={formatSpotMessage(name, description, current, getAppUrl())}
+              message={formatSpotMessage(name, description, current, getAppUrl(), goodSectors)}
               label={`Share ${name}`}
             />
+          )}
+          {onEditSectors && (
+            <span
+              role="button"
+              aria-label={`Edit wind directions for ${name}`}
+              title="Which wind directions work here"
+              tabIndex={0}
+              onClick={(e) => {
+                e.stopPropagation();
+                onEditSectors(id);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onEditSectors(id);
+                }
+              }}
+              className={`w-7 h-7 flex items-center justify-center rounded-full transition cursor-pointer text-xs leading-none ${
+                goodSectors && goodSectors.length > 0
+                  ? 'bg-green-900/50 text-green-300 hover:bg-green-800/70'
+                  : 'bg-slate-900/60 text-slate-400 hover:bg-slate-700 hover:text-white'
+              }`}
+            >
+              ⌖
+            </span>
           )}
           {onRemove && (
             <span

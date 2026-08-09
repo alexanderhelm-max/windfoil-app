@@ -14,6 +14,12 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { SmhiObsHistory, ForecastPoint } from '@/lib/smhi';
+import {
+  WindSector,
+  isGoodWindDirection,
+  headingToCompass,
+  conditionColors,
+} from '@/lib/wind-utils';
 
 interface WindTimelineProps {
   spotName: string;
@@ -27,6 +33,8 @@ interface WindTimelineProps {
   obsStation?: { id: number; name: string; distanceKm: number; provider?: 'viva' | 'smhi' } | null;
   /** Which forecast model produced the forecast points */
   forecastSource?: 'open-meteo' | 'smhi' | null;
+  /** Working sectors, used to colour the direction arrows */
+  goodSectors?: WindSector[];
 }
 
 interface ChartDataPoint {
@@ -34,6 +42,10 @@ interface ChartDataPoint {
   label: string;
   obsAvg?: number;
   obsGust?: number;
+  /** Wind bearing at this time, drawn as an arrow near the top of the plot */
+  dir?: number;
+  /** Set only on the points chosen to carry an arrow, so they don't crowd */
+  dirY?: number;
   fctAvg?: number;
   fctGust?: number;
   smhiAvg?: number;
@@ -41,11 +53,18 @@ interface ChartDataPoint {
 }
 
 type RangeKey = 'now' | 'today' | 'ahead';
-const RANGES: Record<RangeKey, { label: string; pastH: number; futureH: number }> = {
-  now: { label: 'Now', pastH: 2, futureH: 4 },
-  today: { label: 'Today', pastH: 4, futureH: 12 },
-  ahead: { label: 'Ahead', pastH: 0, futureH: 96 },
+/** arrowEveryH keeps the direction row legible as the window widens. */
+const RANGES: Record<
+  RangeKey,
+  { label: string; pastH: number; futureH: number; arrowEveryH: number }
+> = {
+  now: { label: 'Now', pastH: 2, futureH: 4, arrowEveryH: 1 },
+  today: { label: 'Today', pastH: 4, futureH: 12, arrowEveryH: 2 },
+  ahead: { label: 'Ahead', pastH: 0, futureH: 96, arrowEveryH: 6 },
 };
+
+/** Height in the 0–20 m/s domain where the arrow row sits. */
+const ARROW_Y = 18.6;
 
 function formatAxisTime(epochMs: number): string {
   const d = new Date(epochMs);
@@ -78,6 +97,7 @@ export default function WindTimeline({
   historyIsModelled = false,
   obsStation = null,
   forecastSource = null,
+  goodSectors,
 }: WindTimelineProps) {
   const [range, setRange] = useState<RangeKey>('today');
   const nowEpoch = Date.now();
@@ -97,12 +117,17 @@ export default function WindTimeline({
     for (const p of history.gust) {
       obsGustMap.set(p.time, p.value);
     }
+    const obsDirMap = new Map<number, number>();
+    for (const p of history.windDir) {
+      obsDirMap.set(p.time, p.value);
+    }
 
     // Use windSpeed times as anchor
     for (const p of history.windSpeed) {
       const existing = dataMap.get(p.time) ?? { time: p.time, label: formatAxisTime(p.time) };
       existing.obsAvg = obsSpeedMap.get(p.time);
       existing.obsGust = obsGustMap.get(p.time);
+      existing.dir = obsDirMap.get(p.time);
       dataMap.set(p.time, existing);
     }
   }
@@ -113,6 +138,7 @@ export default function WindTimeline({
     const existing = dataMap.get(t) ?? { time: t, label: formatAxisTime(t) };
     existing.fctAvg = f.windSpeed;
     existing.fctGust = f.gust;
+    existing.dir = existing.dir ?? f.windDir;
     dataMap.set(t, existing);
   }
   for (const f of forecastSmhi) {
@@ -151,6 +177,46 @@ export default function WindTimeline({
     chartData[lastObsIdx].smhiGust = chartData[lastObsIdx].obsGust;
   }
 
+  // Space the arrows by time rather than by index: sources differ in density,
+  // so every Nth point would bunch up on 10-minute data and thin out on hourly.
+  const arrowStepMs = RANGES[range].arrowEveryH * 3600 * 1000;
+  let lastArrowAt = -Infinity;
+  for (const p of chartData) {
+    if (p.dir === undefined) continue;
+    if (p.time - lastArrowAt < arrowStepMs) continue;
+    p.dirY = ARROW_Y;
+    lastArrowAt = p.time;
+  }
+
+  /**
+   * One wind arrow, pointing where the wind is going (bearing + 180°).
+   *
+   * Colour only claims something when the spot has working sectors set: green
+   * for wind it can use, muted for wind it can't. Without sectors we don't
+   * know, so every arrow stays neutral rather than implying approval.
+   */
+  interface DotProps {
+    cx?: number;
+    cy?: number;
+    payload?: ChartDataPoint;
+  }
+  const hasSectors = !!goodSectors && goodSectors.length > 0;
+  const DirectionArrow = ({ cx, cy, payload }: DotProps) => {
+    if (cx == null || cy == null || payload?.dir === undefined || payload.dirY === undefined) {
+      return null;
+    }
+    const color = !hasSectors
+      ? '#94a3b8'
+      : isGoodWindDirection(payload.dir, goodSectors)
+        ? conditionColors.great
+        : '#64748b';
+    return (
+      <g transform={`translate(${cx},${cy}) rotate(${(payload.dir + 180) % 360})`}>
+        <path d="M0,-7 L-3.6,7 L0,4 L3.6,7 Z" fill={color} />
+      </g>
+    );
+  };
+
   interface TooltipPayloadEntry {
     name?: string;
     value?: number;
@@ -165,17 +231,40 @@ export default function WindTimeline({
     const { active, payload, label } = props;
     if (!active || !payload || payload.length === 0) return null;
     const labelNum = typeof label === 'number' ? label : Number(label);
+    const point = chartData.find((p) => p.time === labelNum);
     return (
       <div className="bg-slate-800 border border-slate-600 rounded-lg p-3 text-sm shadow-xl">
         <p className="text-slate-300 mb-2 font-medium">
           {!isNaN(labelNum) ? formatTooltipTime(labelNum) : ''}
         </p>
-        {payload.map((entry, i) => (
-          <div key={entry.name ?? i} className="flex items-center gap-2">
-            <span style={{ color: entry.color ?? '#94a3b8' }}>{entry.name ?? ''}:</span>
-            <span className="font-semibold text-white">{entry.value?.toFixed(1)} m/s</span>
+        {payload
+          .filter((entry) => entry.name !== 'dir')
+          .map((entry, i) => (
+            <div key={entry.name ?? i} className="flex items-center gap-2">
+              <span style={{ color: entry.color ?? '#94a3b8' }}>{entry.name ?? ''}:</span>
+              <span className="font-semibold text-white">{entry.value?.toFixed(1)} m/s</span>
+            </div>
+          ))}
+        {point?.dir !== undefined && (
+          <div className="flex items-center gap-2 mt-1 pt-1 border-t border-slate-700">
+            <span className="text-slate-400">Wind from:</span>
+            <span className="font-semibold text-white">
+              {headingToCompass(point.dir)} {Math.round(point.dir)}°
+            </span>
+            {hasSectors && (
+              <span
+                className="text-xs"
+                style={{
+                  color: isGoodWindDirection(point.dir, goodSectors)
+                    ? conditionColors.great
+                    : '#94a3b8',
+                }}
+              >
+                {isGoodWindDirection(point.dir, goodSectors) ? 'works here' : 'off-sector'}
+              </span>
+            )}
           </div>
-        ))}
+        )}
       </div>
     );
   };
@@ -302,6 +391,20 @@ export default function WindTimeline({
               fontSize: 11,
               fontWeight: 600,
             }}
+          />
+
+          {/* Wind direction: an invisible line whose dots are the arrows, so
+              Recharts places them on the time axis for us. Legend entry hidden
+              — the arrows explain themselves. */}
+          <Line
+            dataKey="dirY"
+            name="dir"
+            stroke="transparent"
+            legendType="none"
+            dot={<DirectionArrow />}
+            activeDot={false}
+            connectNulls={false}
+            isAnimationActive={false}
           />
 
           {/* Observed avg */}

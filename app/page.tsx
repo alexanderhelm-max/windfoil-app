@@ -33,8 +33,6 @@ export default function Page() {
             <span className="w-2.5 h-2.5 rounded-full bg-orange-400 inline-block" />
             Crazy fun (&gt;13 m/s)
           </span>
-          <span className="text-slate-600 hidden sm:inline">|</span>
-          <span className="text-slate-500 hidden sm:inline">Good direction: S–NW · Other directions: +1 m/s on all thresholds</span>
         </div>
       </div>
 

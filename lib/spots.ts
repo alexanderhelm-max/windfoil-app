@@ -9,6 +9,15 @@ export interface Spot {
   holfuyId?: number | null;
   lat: number;
   lon: number;
+  /**
+   * Compass sectors (degrees the wind blows FROM) that actually work here.
+   * Wraps around, so { from: 315, to: 45 } means NW through N to NE.
+   *
+   * Undefined or empty means "unknown", and the spot is then graded on wind
+   * speed alone — every spot has its own geometry and guessing one for all of
+   * them was worse than not guessing at all.
+   */
+  goodSectors?: { from: number; to: number }[];
 }
 
 export const DEFAULT_SPOTS: Spot[] = [

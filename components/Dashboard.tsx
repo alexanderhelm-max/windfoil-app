@@ -7,9 +7,10 @@ import WindTimeline from './WindTimeline';
 import GoWindow from './GoWindow';
 import AlertBanner from './AlertBanner';
 import AddSpotDialog from './AddSpotDialog';
+import EditSectorsDialog from './EditSectorsDialog';
 import { VivaObservation } from '@/lib/viva';
 import { SmhiObsHistory, ForecastPoint, DaylightInfo, ForecastSource } from '@/lib/smhi';
-import { getCondition, getHourTrend } from '@/lib/wind-utils';
+import { getCondition, getHourTrend, WindSector } from '@/lib/wind-utils';
 import { Spot, DEFAULT_SPOTS } from '@/lib/spots';
 import { loadSpots, saveSpots, resetSpots } from '@/lib/spot-store';
 import { buildShareSpotsUrl, decodeSpotsFromParam, copyToClipboard } from '@/lib/share';
@@ -69,6 +70,7 @@ export default function Dashboard() {
   const [dataLoaded, setDataLoaded] = useState(false);
   const [selectedSpotId, setSelectedSpotId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [editingSectorsId, setEditingSectorsId] = useState<string | null>(null);
   const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null);
   const [pendingImport, setPendingImport] = useState<Spot[] | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
@@ -167,6 +169,23 @@ export default function Dashboard() {
       if (selectedSpotId === id) setSelectedSpotId(null);
     },
     [spots, updateSpots, selectedSpotId]
+  );
+
+  const handleSaveSectors = useCallback(
+    (id: string, goodSectors: WindSector[]) => {
+      updateSpots(
+        spots.map((s) =>
+          s.id === id
+            ? // Drop the key entirely when nothing is selected, so "unknown"
+              // stays distinguishable from "configured as empty".
+              goodSectors.length > 0
+              ? { ...s, goodSectors }
+              : (({ goodSectors: _drop, ...rest }) => rest)(s)
+            : s
+        )
+      );
+    },
+    [spots, updateSpots]
   );
 
   const handleReset = useCallback(() => {
@@ -315,12 +334,12 @@ export default function Dashboard() {
   const greatSpots = effectiveSpots
     .filter((e) => {
       if (!e.current) return false;
-      const condition = getCondition(e.current.avgWind, e.current.heading);
+      const condition = getCondition(e.current.avgWind, e.current.heading, e.spot.goodSectors);
       return condition === 'great' || condition === 'crazy';
     })
     .map((e) => ({
       name: e.spot.name,
-      condition: getCondition(e.current!.avgWind, e.current!.heading) as 'great' | 'crazy',
+      condition: getCondition(e.current!.avgWind, e.current!.heading, e.spot.goodSectors) as 'great' | 'crazy',
       avgWind: e.current!.avgWind,
     }));
 
@@ -330,6 +349,7 @@ export default function Dashboard() {
     current: e.current,
     forecast: e.forecast,
     trend: e.trend,
+    goodSectors: e.spot.goodSectors,
   }));
 
   // Surface forecast status:
@@ -513,6 +533,8 @@ export default function Dashboard() {
                 airTempIsForecast={e.airTempIsForecast}
                 windIsForecast={e.windIsForecast}
                 currentStation={e.currentStation}
+                goodSectors={e.spot.goodSectors}
+                onEditSectors={setEditingSectorsId}
                 daylight={e.daylight}
               />
             </div>
@@ -538,9 +560,21 @@ export default function Dashboard() {
             obsStation={selectedEntry.obsStation}
             forecastSource={selectedEntry.forecastSource}
             forecastSmhi={selectedEntry.forecastSmhi}
+            goodSectors={selectedEntry.spot.goodSectors}
           />
         )}
       </section>
+
+      {editingSectorsId && (() => {
+        const spot = spots.find((s) => s.id === editingSectorsId);
+        return spot ? (
+          <EditSectorsDialog
+            spot={spot}
+            onSave={(sectors) => handleSaveSectors(spot.id, sectors)}
+            onClose={() => setEditingSectorsId(null)}
+          />
+        ) : null;
+      })()}
 
       {showAdd && (
         <AddSpotDialog

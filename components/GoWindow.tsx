@@ -9,6 +9,7 @@ import {
   ConditionLevel,
   headingToCompass,
   bearingDiff,
+  WindSector,
 } from '@/lib/wind-utils';
 import { formatRankingMessage, getAppUrl } from '@/lib/share';
 import ShareMenu from './ShareMenu';
@@ -36,6 +37,8 @@ interface SpotForecast {
   forecast: ForecastPoint[];
   /** Last-hour measured trend; only meaningful for the "right now" ranking */
   trend: Trend | null;
+  /** Compass sectors this spot works in; undefined means grade on speed alone */
+  goodSectors?: WindSector[];
 }
 
 interface GoWindowProps {
@@ -84,7 +87,8 @@ function findBestWindowInRange(
   spotName: string,
   forecast: ForecastPoint[],
   startHours: number,
-  endHours: number
+  endHours: number,
+  goodSectors?: WindSector[]
 ): RankedSpot | null {
   if (forecast.length === 0) return null;
   const now = Date.now();
@@ -102,7 +106,7 @@ function findBestWindowInRange(
   const blocks: ForecastPoint[][] = [];
   let current: ForecastPoint[] = [];
   for (const p of trimmed) {
-    const c = getCondition(p.windSpeed, p.windDir);
+    const c = getCondition(p.windSpeed, p.windDir, goodSectors);
     if (c !== 'too-little') {
       current.push(p);
     } else {
@@ -124,7 +128,7 @@ function findBestWindowInRange(
       const avgDir = avgBearing(b.map((p) => p.windDir));
       const startDir = b[0].windDir;
       const endDir = b[b.length - 1].windDir;
-      const condition = getCondition(avgSpeed, avgDir);
+      const condition = getCondition(avgSpeed, avgDir, goodSectors);
       const gustRatio = avgSpeed > 0 ? avgGust / avgSpeed : 1;
       const startTime = new Date(b[0].time);
       const endTime = new Date(b[b.length - 1].time);
@@ -171,7 +175,7 @@ function findBestWindowInRange(
 
 function rank(spotForecasts: SpotForecast[], startHours: number, endHours: number): RankedSpot[] {
   const ranked = spotForecasts
-    .map((sf) => findBestWindowInRange(sf.spotId, sf.spotName, sf.forecast, startHours, endHours))
+    .map((sf) => findBestWindowInRange(sf.spotId, sf.spotName, sf.forecast, startHours, endHours, sf.goodSectors))
     .filter((r): r is RankedSpot => r !== null);
   // Sort by condition rank, then avg wind speed, then duration, then less gustiness
   ranked.sort((a, b) => {
@@ -196,7 +200,7 @@ function rankNow(spotForecasts: SpotForecast[]): RankedSpot[] {
     .filter((sf) => sf.current !== null)
     .map((sf) => {
       const c = sf.current!;
-      const condition = getCondition(c.avgWind, c.heading);
+      const condition = getCondition(c.avgWind, c.heading, sf.goodSectors);
       const gustRatio = c.avgWind > 0 ? c.gust / c.avgWind : 1;
       return {
         spotId: sf.spotId,
