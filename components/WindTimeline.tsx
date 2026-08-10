@@ -63,8 +63,8 @@ const RANGES: Record<
   ahead: { label: 'Ahead', pastH: 0, futureH: 96, arrowEveryH: 6 },
 };
 
-/** Height in the 0–20 m/s domain where the arrow row sits. */
-const ARROW_Y = 18.6;
+/** Clear air kept above the highest reading so the arrow row never sits on it. */
+const ARROW_HEADROOM = 3;
 
 function formatAxisTime(epochMs: number): string {
   const d = new Date(epochMs);
@@ -154,28 +154,22 @@ export default function WindTimeline({
   // just inside the window edge.
   const chartData = allData.filter((p) => p.time >= windowStart && p.time <= windowEnd);
 
-  // Bridge: stamp the last observed values onto the last obs point as forecast
-  // values so the forecast line reaches (and continues past) the live "now"
-  // anchor. Only mirror into the reverse direction — obs onto the first
-  // forecast point — when the forecast comes strictly AFTER all obs; when a
-  // NOW-anchor sits between two hourly forecast buckets, doing the reverse
-  // would paint a phantom "measured" value that's actually just forecast.
-  const lastObsIdx = chartData.reduce((best, p, i) => (p.obsAvg !== undefined ? i : best), -1);
-  const firstFctIdx = chartData.findIndex((p) => p.fctAvg !== undefined);
-  if (lastObsIdx >= 0 && firstFctIdx >= 0) {
-    chartData[lastObsIdx].fctAvg = chartData[lastObsIdx].obsAvg;
-    chartData[lastObsIdx].fctGust = chartData[lastObsIdx].obsGust;
-    if (firstFctIdx > lastObsIdx) {
-      chartData[firstFctIdx].obsAvg = chartData[firstFctIdx].fctAvg;
-      chartData[firstFctIdx].obsGust = chartData[firstFctIdx].fctGust;
-    }
-  }
-  // Same anchoring for the second forecast source, so the teal line also
-  // departs from the measured NOW point rather than floating in from nowhere.
-  if (lastObsIdx >= 0 && chartData.some((p) => p.smhiAvg !== undefined)) {
-    chartData[lastObsIdx].smhiAvg = chartData[lastObsIdx].obsAvg;
-    chartData[lastObsIdx].smhiGust = chartData[lastObsIdx].obsGust;
-  }
+  // Deliberately NOT bridged. Stamping the last measured value into the
+  // forecast series joined the lines, but drew the forecast through a value it
+  // never predicted — invisible when the forecast is close, and a near-vertical
+  // cliff when it's off by 3 m/s, misrepresenting both series. Each line now
+  // shows only its own data, and the gap at NOW is the honest reading: it is
+  // how far the forecast currently sits from what's actually blowing.
+
+  // The arrow row needs air above the data. A fixed height put it at 18.6 in a
+  // 0–20 axis, which lands right on the gust line whenever it blows hard — so
+  // the axis grows with the readings and the arrows ride just under its top.
+  const maxReading = chartData.reduce((m, p) => {
+    const vals = [p.obsAvg, p.obsGust, p.fctAvg, p.fctGust, p.smhiAvg, p.smhiGust];
+    return vals.reduce((a: number, v) => (typeof v === 'number' && v > a ? v : a), m);
+  }, 0);
+  const axisMax = Math.max(20, Math.ceil(maxReading) + ARROW_HEADROOM);
+  const arrowY = axisMax - ARROW_HEADROOM / 2;
 
   // Space the arrows by time rather than by index: sources differ in density,
   // so every Nth point would bunch up on 10-minute data and thin out on hourly.
@@ -184,7 +178,7 @@ export default function WindTimeline({
   for (const p of chartData) {
     if (p.dir === undefined) continue;
     if (p.time - lastArrowAt < arrowStepMs) continue;
-    p.dirY = ARROW_Y;
+    p.dirY = arrowY;
     lastArrowAt = p.time;
   }
 
@@ -346,7 +340,7 @@ export default function WindTimeline({
           <ReferenceArea y1={0} y2={4} fill="#9ca3af" fillOpacity={0.08} />
           <ReferenceArea y1={4} y2={6} fill="#fbbf24" fillOpacity={0.1} />
           <ReferenceArea y1={6} y2={13} fill="#22c55e" fillOpacity={0.08} />
-          <ReferenceArea y1={13} y2={20} fill="#f97316" fillOpacity={0.1} />
+          <ReferenceArea y1={13} y2={axisMax} fill="#f97316" fillOpacity={0.1} />
 
           <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
 
@@ -363,7 +357,7 @@ export default function WindTimeline({
             minTickGap={40}
           />
           <YAxis
-            domain={[0, 20]}
+            domain={[0, axisMax]}
             tick={{ fill: '#94a3b8', fontSize: 11 }}
             tickLine={{ stroke: '#334155' }}
             axisLine={{ stroke: '#334155' }}
