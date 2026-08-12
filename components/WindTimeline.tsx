@@ -377,46 +377,7 @@ export default function WindTimeline({
   return (
     <div className="bg-slate-800 rounded-xl p-4">
       <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
-        <h3 className="text-lg font-semibold text-slate-200 flex items-center gap-2 flex-wrap">
-          {spotName} — Wind Timeline
-          {!history || (history.windSpeed.length === 0 && history.gust.length === 0) ? null : historyIsModelled ? (
-            <span
-              className="text-xs font-normal px-2 py-0.5 rounded-full bg-slate-700 text-slate-400"
-              title="Past wind shown is from Open-Meteo model — no measured station with fresh data nearby."
-            >
-              past = model
-            </span>
-          ) : obsStation ? (
-            <span
-              className="text-xs font-normal px-2 py-0.5 rounded-full bg-emerald-900/50 text-emerald-300"
-              title={`Past wind measured at ${obsStation.provider === 'viva' ? 'VIVA' : 'SMHI'} station ${obsStation.name}, ${obsStation.distanceKm.toFixed(0)} km away.`}
-            >
-              past: {obsStation.provider === 'viva' ? 'VIVA' : 'SMHI'} {obsStation.name} ·{' '}
-              {obsStation.distanceKm < 1.5 ? '<2' : obsStation.distanceKm.toFixed(0)} km
-            </span>
-          ) : (
-            <span
-              className="text-xs font-normal px-2 py-0.5 rounded-full bg-emerald-900/50 text-emerald-300"
-              title="Past wind measured at the station paired with this spot."
-            >
-              past: measured
-            </span>
-          )}
-          {forecast.length > 0 && forecastSource && (
-            <span
-              className="text-xs font-normal px-2 py-0.5 rounded-full bg-indigo-900/50 text-indigo-300"
-              title={
-                forecastSmhi.length > 0
-                  ? 'Two forecast opinions: Open-Meteo (indigo) and SMHI point forecast (teal). Where they agree, trust it more.'
-                  : forecastSource === 'smhi'
-                    ? 'Forecast from SMHI point forecast (Open-Meteo was unavailable).'
-                    : 'Forecast from Open-Meteo (blend of weather models).'
-              }
-            >
-              fct: {forecastSmhi.length > 0 ? 'Open-Meteo + SMHI' : forecastSource === 'smhi' ? 'SMHI' : 'Open-Meteo'}
-            </span>
-          )}
-        </h3>
+        <h3 className="text-lg font-semibold text-slate-200">{spotName} — Wind Timeline</h3>
         <div className="inline-flex rounded-lg bg-slate-900/60 p-0.5 border border-slate-700">
           {(Object.keys(RANGES) as RangeKey[]).map((k) => {
             const active = range === k;
@@ -673,6 +634,50 @@ export default function WindTimeline({
           <span className="w-3 h-3 rounded-sm inline-block align-middle" style={{ background: '#f9731622' }}></span>
           Crazy (&gt;13)
         </span>
+      </div>
+
+      {/* Attribution sits at the foot of the card rather than beside the title.
+          Which station and which model produced these numbers is something you
+          check once, or go looking for when a reading seems off — it doesn't
+          need to compete with the spot name for the top of the chart. */}
+      <div className="mt-3 pt-2 border-t border-slate-700/60 flex gap-2 flex-wrap justify-center">
+        {!history || (history.windSpeed.length === 0 && history.gust.length === 0) ? null : historyIsModelled ? (
+          <span
+            className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-400"
+            title="Past wind shown is from Open-Meteo model — no measured station with fresh data nearby."
+          >
+            past = model
+          </span>
+        ) : obsStation ? (
+          <span
+            className="text-xs px-2 py-0.5 rounded-full bg-emerald-900/50 text-emerald-300"
+            title={`Past wind measured at ${obsStation.provider === 'viva' ? 'VIVA' : 'SMHI'} station ${obsStation.name}, ${obsStation.distanceKm.toFixed(0)} km away.`}
+          >
+            past: {obsStation.provider === 'viva' ? 'VIVA' : 'SMHI'} {obsStation.name} ·{' '}
+            {obsStation.distanceKm < 1.5 ? '<2' : obsStation.distanceKm.toFixed(0)} km
+          </span>
+        ) : (
+          <span
+            className="text-xs px-2 py-0.5 rounded-full bg-emerald-900/50 text-emerald-300"
+            title="Past wind measured at the station paired with this spot."
+          >
+            past: measured
+          </span>
+        )}
+        {forecast.length > 0 && forecastSource && (
+          <span
+            className="text-xs px-2 py-0.5 rounded-full bg-indigo-900/50 text-indigo-300"
+            title={
+              forecastSmhi.length > 0
+                ? 'Two forecast opinions: Open-Meteo (indigo) and SMHI point forecast (teal). Where they agree, trust it more.'
+                : forecastSource === 'smhi'
+                  ? 'Forecast from SMHI point forecast (Open-Meteo was unavailable).'
+                  : 'Forecast from Open-Meteo (blend of weather models).'
+            }
+          >
+            fct: {forecastSmhi.length > 0 ? 'Open-Meteo + SMHI' : forecastSource === 'smhi' ? 'SMHI' : 'Open-Meteo'}
+          </span>
+        )}
       </div>
     </div>
   );
