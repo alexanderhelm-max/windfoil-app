@@ -293,8 +293,19 @@ export default function Dashboard() {
     let current = d?.current ?? null;
     let airTempIsForecast = false;
     let windIsForecast = false;
-    if (!current && d?.forecast && d.forecast.length > 0) {
-      const nearest = d.forecast[0];
+    // The forecast series now spans the past day as well as the days ahead, so
+    // the point standing in for "right now" is the one closest to now — not the
+    // first in the array, which is a day old.
+    const nearestForecast = d?.forecast?.length
+      ? d.forecast.reduce((best, p) =>
+          Math.abs(new Date(p.time).getTime() - Date.now()) <
+          Math.abs(new Date(best.time).getTime() - Date.now())
+            ? p
+            : best
+        )
+      : null;
+    if (!current && nearestForecast) {
+      const nearest = nearestForecast;
       current = {
         avgWind: nearest.windSpeed,
         gust: nearest.gust,
@@ -305,9 +316,9 @@ export default function Dashboard() {
       };
       airTempIsForecast = nearest.airTemp !== undefined;
       windIsForecast = true;
-    } else if (current && d?.forecast && d.forecast.length > 0) {
+    } else if (current && nearestForecast) {
       // VIVA station with partial data — fill missing wind from forecast, missing air temp too
-      const nearest = d.forecast[0];
+      const nearest = nearestForecast;
       const next: VivaObservation = { ...current };
       if (!current.hasWind) {
         next.avgWind = nearest.windSpeed;

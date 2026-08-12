@@ -175,15 +175,25 @@ interface RawHourly {
   airTemp: number | undefined;
 }
 
-// 0–48h: hourly. 48–96h: every 6 hours (00, 06, 12, 18 UTC).
-// Strictly future points only: the chart anchors the obs line at NOW with the
-// live reading and bridges the forecast line from that anchor, so a pre-NOW
-// forecast point would just overlap measured history.
+/** How far back the forecast is kept, matching the 24h observation history. */
+const FORECAST_PAST_H = 24;
+
+// -24h–48h: hourly. 48–96h: every 6 hours (00, 06, 12, 18 UTC).
+//
+// The past hours are kept on purpose. They cost nothing — the provider returns
+// them in the same response — and they let the chart run the forecast line
+// alongside the measured one over the last day, so you can see how well the
+// model has been tracking reality before deciding whether to trust it tonight.
+// (It used to trim to strictly-future points, because the chart bridged the
+// forecast line from the live NOW anchor and a pre-NOW forecast point would
+// have overlapped that fake segment. The bridge is gone; the reason went with
+// it, and trimming only left an unexplained hole between the two series.)
 function thinAndFormat(all: RawHourly[]): ForecastPoint[] {
   const now = Date.now();
   const cutoff48h = now + 48 * 3600 * 1000;
+  const cutoffPast = now - FORECAST_PAST_H * 3600 * 1000;
   return all
-    .filter((p) => p.epoch >= now)
+    .filter((p) => p.epoch >= cutoffPast)
     .filter((p) => {
       if (p.epoch <= cutoff48h) return true;
       return new Date(p.epoch).getUTCHours() % 6 === 0;
@@ -244,7 +254,10 @@ export async function fetchSmhiForecast(
     `https://api.open-meteo.com/v1/forecast` +
     `?latitude=${lat}&longitude=${lon}` +
     `&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m,temperature_2m` +
-    `&forecast_days=4&wind_speed_unit=ms&timezone=GMT`;
+    // past_days=1 so the past window is covered even early in the morning:
+    // forecast_days alone starts at today 00:00 and would leave almost nothing
+    // behind NOW for the chart to compare against.
+    `&forecast_days=4&past_days=1&wind_speed_unit=ms&timezone=GMT`;
   const { data, error } = await fetchJsonWithDiag(url, { timeoutMs: 8000, revalidate: 3600 });
   if (error || !data) {
     const fb = await fetchSmhiMetfcstForecast(lat, lon);

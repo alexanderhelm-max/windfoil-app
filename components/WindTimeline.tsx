@@ -132,13 +132,21 @@ export default function WindTimeline({
     }
   }
 
-  // Add forecast data points
+  // Add forecast data points. These now reach back over the past day too, so
+  // the forecast line runs alongside the measured one and its track record is
+  // visible rather than assumed.
+  const haveObsDir = (history?.windDir.length ?? 0) > 0;
   for (const f of forecast) {
     const t = new Date(f.time).getTime();
     const existing = dataMap.get(t) ?? { time: t, label: formatAxisTime(t) };
     existing.fctAvg = f.windSpeed;
     existing.fctGust = f.gust;
-    existing.dir = existing.dir ?? f.windDir;
+    // The arrow row should show what was measured wherever a measurement
+    // exists, so the model only supplies a heading from NOW forward — or for
+    // the whole window when there's no observed direction at all.
+    if (existing.dir === undefined && (t >= nowEpoch || !haveObsDir)) {
+      existing.dir = f.windDir;
+    }
     dataMap.set(t, existing);
   }
   for (const f of forecastSmhi) {
