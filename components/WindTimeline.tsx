@@ -125,6 +125,8 @@ export default function WindTimeline({
   goodSectors,
 }: WindTimelineProps) {
   const [range, setRange] = useState<RangeKey>('today');
+  /** Time under the cursor; null means the readout shows the present instead. */
+  const [hoverTime, setHoverTime] = useState<number | null>(null);
   const nowEpoch = Date.now();
   const windowStart = nowEpoch - RANGES[range].pastH * 3600 * 1000;
   const windowEnd = nowEpoch + RANGES[range].futureH * 3600 * 1000;
@@ -306,76 +308,62 @@ export default function WindTimeline({
     return best && bestDelta <= TOOLTIP_SNAP_MS ? best : undefined;
   };
 
-  const obsLabel = (what: string) => (historyIsModelled ? `Past ${what} (model)` : `Obs ${what}`);
+  const obsLabel = historyIsModelled ? 'Past' : 'Obs';
   const primaryName = forecastSource === 'smhi' ? 'SMHI' : 'OM';
-  const tooltipRows: { key: keyof ChartDataPoint; label: string; color: string }[] = [
-    { key: 'obsAvg', label: obsLabel('avg'), color: SERIES.obs },
-    { key: 'obsGust', label: obsLabel('gust'), color: SERIES.obsGust },
-    { key: 'fctAvg', label: `${primaryName} avg`, color: SERIES.om },
-    { key: 'fctGust', label: `${primaryName} gust`, color: SERIES.om },
+  /** avg and gust per source — read as a range, matching the shaded band. */
+  const readoutGroups: {
+    label: string;
+    color: string;
+    avg: keyof ChartDataPoint;
+    gust: keyof ChartDataPoint;
+  }[] = [
+    { label: obsLabel, color: SERIES.obs, avg: 'obsAvg', gust: 'obsGust' },
+    { label: primaryName, color: SERIES.om, avg: 'fctAvg', gust: 'fctGust' },
+    // SMHI's gust is drawn nowhere — worth a number, not a sixth line.
     ...(forecastSmhi.length > 0
-      ? ([
-          // Drawn nowhere — the second opinion's gust is worth a number but not
-          // a sixth line, so it lives here only.
-          { key: 'smhiAvg', label: 'SMHI avg', color: SERIES.smhi },
-          { key: 'smhiGust', label: 'SMHI gust', color: SERIES.smhi },
-        ] as const)
+      ? [{ label: 'SMHI', color: SERIES.smhi, avg: 'smhiAvg' as const, gust: 'smhiGust' as const }]
       : []),
   ];
 
-  const customTooltip = (props: TooltipPropsLoose) => {
-    const { active, label } = props;
-    if (!active) return null;
-    const labelNum = typeof label === 'number' ? label : Number(label);
-    if (isNaN(labelNum)) return null;
+  // Suppressed while the row shows the present, for the same reason as the
+  // crosshair: a dot left over the last mouse position points at a time the
+  // numbers above aren't describing.
+  const activeDot = hoverTime === null ? false : { r: 3.5, strokeWidth: 0 };
 
-    const rows = tooltipRows
-      .map((r) => {
-        const p = nearestWith(labelNum, r.key);
-        if (!p) return null;
-        return { ...r, value: p[r.key] as number, at: p.time };
+  const track = (s: { activeLabel?: string | number }) => {
+    const t = typeof s?.activeLabel === 'number' ? s.activeLabel : Number(s?.activeLabel);
+    setHoverTime(isNaN(t) ? null : t);
+  };
+
+  const hhmm = (t: number) =>
+    new Date(t).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+
+  /**
+   * The readout row above the plot.
+   *
+   * This used to be a tooltip floating over the chart, which covered exactly
+   * the part you were trying to read — worst around NOW, where you look most.
+   * Sitting above the plot it can never occlude anything, and it earns its
+   * space at rest too: the current conditions are now readable without
+   * touching the mouse, where before you had to hover to see a single number.
+   */
+  const readoutAt = (t: number) => {
+    const groups = readoutGroups
+      .map((g) => {
+        const avgP = nearestWith(t, g.avg);
+        if (!avgP) return null;
+        const gustP = nearestWith(t, g.gust);
+        return {
+          ...g,
+          avgValue: avgP[g.avg] as number,
+          gustValue: gustP ? (gustP[g.gust] as number) : undefined,
+          // Sources run on different clocks; say so rather than implying these
+          // readings share a timestamp with the one in the header.
+          at: Math.abs(avgP.time - t) >= 60_000 ? avgP.time : null,
+        };
       })
-      .filter((r): r is NonNullable<typeof r> => r !== null);
-    if (rows.length === 0) return null;
-
-    const dirPoint = nearestWith(labelNum, 'dir');
-    const hhmm = (t: number) =>
-      new Date(t).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
-    // Only worth showing when it isn't the time in the header.
-    const stamp = (t: number) => (Math.abs(t - labelNum) >= 60_000 ? hhmm(t) : null);
-
-    return (
-      <div className="bg-slate-800 border border-slate-600 rounded-lg p-3 text-sm shadow-xl">
-        <p className="text-slate-300 mb-2 font-medium">{formatTooltipTime(labelNum)}</p>
-        {rows.map((r) => (
-          <div key={r.key} className="flex items-baseline gap-2">
-            <span style={{ color: r.color }}>{r.label}:</span>
-            <span className="font-semibold text-white">{r.value.toFixed(1)} m/s</span>
-            {stamp(r.at) && <span className="text-xs text-slate-500">{stamp(r.at)}</span>}
-          </div>
-        ))}
-        {dirPoint?.dir !== undefined && (
-          <div className="flex items-center gap-2 mt-1 pt-1 border-t border-slate-700">
-            <span className="text-slate-400">Wind from:</span>
-            <span className="font-semibold text-white">
-              {headingToCompass(dirPoint.dir)} {Math.round(dirPoint.dir)}°
-            </span>
-            {hasSectors && (
-              <span
-                className="text-xs"
-                style={{
-                  color: isGoodWindDirection(dirPoint.dir, goodSectors)
-                    ? conditionColors.great
-                    : '#94a3b8',
-                }}
-              >
-                {isGoodWindDirection(dirPoint.dir, goodSectors) ? 'works here' : 'off-sector'}
-              </span>
-            )}
-          </div>
-        )}
-      </div>
-    );
+      .filter((g): g is NonNullable<typeof g> => g !== null);
+    return { groups, dir: nearestWith(t, 'dir')?.dir };
   };
 
   if (allData.length === 0) {
@@ -449,8 +437,65 @@ export default function WindTimeline({
           })}
         </div>
       </div>
+
+      {(() => {
+        const at = hoverTime ?? nowEpoch;
+        const { groups, dir } = readoutAt(at);
+        return (
+          <div className="mb-2 flex items-baseline gap-x-4 gap-y-1 flex-wrap text-sm min-h-[26px]">
+            <span className="text-slate-400 font-medium tabular-nums shrink-0">
+              {hoverTime === null ? 'Now' : formatTooltipTime(hoverTime)}
+            </span>
+            {groups.map((g) => (
+              <span key={g.label} className="flex items-baseline gap-1.5 tabular-nums">
+                <span style={{ color: g.color }}>{g.label}</span>
+                {/* No space around the dash, or "6.2 –8.8" reads as a negative
+                    number instead of the avg-to-gust range the band shows. */}
+                <span>
+                  <span className="font-semibold text-white">{g.avgValue.toFixed(1)}</span>
+                  {g.gustValue !== undefined && (
+                    <span className="text-slate-400">–{g.gustValue.toFixed(1)}</span>
+                  )}
+                </span>
+                {g.at && <span className="text-xs text-slate-500">{hhmm(g.at)}</span>}
+              </span>
+            ))}
+            {groups.length > 0 && <span className="text-slate-500 text-xs">m/s</span>}
+            {dir !== undefined && (
+              <span className="flex items-baseline gap-1.5 tabular-nums">
+                <span className="text-slate-400">from</span>
+                <span className="font-semibold text-white">
+                  {headingToCompass(dir)} {Math.round(dir)}°
+                </span>
+                {hasSectors && (
+                  <span
+                    className="text-xs"
+                    style={{
+                      color: isGoodWindDirection(dir, goodSectors)
+                        ? conditionColors.great
+                        : '#94a3b8',
+                    }}
+                  >
+                    {isGoodWindDirection(dir, goodSectors) ? 'works here' : 'off-sector'}
+                  </span>
+                )}
+              </span>
+            )}
+          </div>
+        );
+      })()}
+
       <ResponsiveContainer width="100%" height={300}>
-        <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+        <ComposedChart
+          data={chartData}
+          margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+          // Covers touch as well: Recharts routes a dragged finger through the
+          // same handler, so the readout follows on a phone without a separate
+          // touch path. Lifting the finger leaves the last reading up rather
+          // than snapping back to Now, which is what you want on a phone.
+          onMouseMove={track}
+          onMouseLeave={() => setHoverTime(null)}
+        >
           {/* Background color bands for condition levels */}
           {bands.map((b) => (
             <ReferenceArea
@@ -486,7 +531,18 @@ export default function WindTimeline({
             label={{ value: 'm/s', position: 'insideLeft', fill: '#64748b', fontSize: 11, dy: 40 }}
           />
 
-          <Tooltip content={customTooltip} />
+          {/* No panel — the numbers live in the readout row above. Kept only
+              for the crosshair, which ties that row to a place on the plot.
+              Hidden while the row is showing the present, so a stale crosshair
+              can't point somewhere the numbers aren't. */}
+          <Tooltip
+            content={() => null}
+            cursor={
+              hoverTime === null
+                ? false
+                : { stroke: '#e2e8f0', strokeWidth: 1, strokeOpacity: 0.7 }
+            }
+          />
 
           {/* Spelled out rather than derived from child order, which would put
               the gust band ahead of the measured line it belongs to, and would
@@ -494,8 +550,8 @@ export default function WindTimeline({
           <Legend
             wrapperStyle={{ color: '#94a3b8', fontSize: '12px', paddingTop: '8px' }}
             payload={[
-              { value: obsLabel('avg'), type: 'line', color: SERIES.obs, id: 'obsAvg' },
-              { value: obsLabel('gust'), type: 'rect', color: SERIES.obsGust, id: 'obsBand' },
+              { value: `${obsLabel} avg`, type: 'line', color: SERIES.obs, id: 'obsAvg' },
+              { value: `${obsLabel} gust`, type: 'rect', color: SERIES.obsGust, id: 'obsBand' },
               { value: `${primaryName} avg`, type: 'line', color: SERIES.om, id: 'fctAvg' },
               { value: `${primaryName} gust`, type: 'line', color: SERIES.om, id: 'fctGust' },
               ...(forecastSmhi.length > 0
@@ -538,7 +594,7 @@ export default function WindTimeline({
               Drawn first so the lines sit on top of it. */}
           <Area
             dataKey="obsBand"
-            name={historyIsModelled ? 'Past gust (model)' : 'Obs gust'}
+            name={`${obsLabel} gust`}
             stroke="none"
             fill={SERIES.obsGust}
             fillOpacity={0.16}
@@ -549,10 +605,11 @@ export default function WindTimeline({
           {/* Measured avg — the ground truth, and the only line drawn as such */}
           <Line
             dataKey="obsAvg"
-            name={historyIsModelled ? 'Past avg (model)' : 'Obs avg'}
+            name={`${obsLabel} avg`}
             stroke={SERIES.obs}
             strokeWidth={2.5}
             dot={false}
+            activeDot={activeDot}
             connectNulls
             isAnimationActive={false}
           />
@@ -564,6 +621,7 @@ export default function WindTimeline({
             strokeWidth={2}
             strokeDasharray="6 3"
             dot={false}
+            activeDot={activeDot}
             connectNulls
             isAnimationActive={false}
           />
@@ -577,6 +635,7 @@ export default function WindTimeline({
             strokeDasharray="2 3"
             strokeOpacity={0.5}
             dot={false}
+            activeDot={activeDot}
             connectNulls
             isAnimationActive={false}
           />
@@ -589,6 +648,7 @@ export default function WindTimeline({
               strokeWidth={2}
               strokeDasharray="6 3"
               dot={false}
+              activeDot={activeDot}
               connectNulls
               isAnimationActive={false}
             />
