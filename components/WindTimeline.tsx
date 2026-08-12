@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import {
   ComposedChart,
+  Area,
   Line,
   XAxis,
   YAxis,
@@ -42,6 +43,8 @@ interface ChartDataPoint {
   label: string;
   obsAvg?: number;
   obsGust?: number;
+  /** [avg, gust] drawn as a shaded band instead of a second measured line */
+  obsBand?: [number, number];
   /** Wind bearing at this time, drawn as an arrow near the top of the plot */
   dir?: number;
   /** Set only on the points chosen to carry an arrow, so they don't crowd */
@@ -65,6 +68,28 @@ const RANGES: Record<
 
 /** Clear air kept above the highest reading so the arrow row never sits on it. */
 const ARROW_HEADROOM = 3;
+
+/**
+ * One declaration of each series' colour, shared by the chart and the tooltip
+ * so the two can't drift apart.
+ *
+ * Measured wind is the only white, solid, full-strength line — it's the ground
+ * truth and should read that way without consulting the legend. The forecasts
+ * are dimmer and dashed, and sit far enough apart in hue (indigo ~234°, teal
+ * ~174°) to stay distinct. The previous palette put observed on blue-500 and
+ * Open-Meteo on indigo-500, only 22° apart: fine while the two never shared an
+ * x-position, unreadable now that the forecast runs back across the measured
+ * day.
+ */
+const SERIES = {
+  obs: '#ffffff',
+  obsGust: '#cbd5e1',
+  om: '#818cf8',
+  smhi: '#2dd4bf',
+} as const;
+
+/** How far the tooltip will reach to pair up readings taken on different clocks. */
+const TOOLTIP_SNAP_MS = 30 * 60 * 1000;
 
 function formatAxisTime(epochMs: number): string {
   const d = new Date(epochMs);
@@ -169,18 +194,50 @@ export default function WindTimeline({
   // shows only its own data, and the gap at NOW is the honest reading: it is
   // how far the forecast currently sits from what's actually blowing.
 
-  // The arrow row needs air above the data. A fixed height put it at 18.6 in a
-  // 0–20 axis, which lands right on the gust line whenever it blows hard — so
-  // the axis grows with the readings and the arrows ride just under its top.
+  // The axis tracks the readings in both directions. It used to have a floor of
+  // 20, which on a 8 m/s day squeezed every line into the bottom 40% of the
+  // plot and left the rest empty — the single biggest reason six series looked
+  // like a tangle. The floor is now 10, low enough to let a light day fill the
+  // frame but high enough that "nowhere near rideable" still reads as such.
+  // Only series that are actually drawn count, so a hidden one can't inflate it.
   const maxReading = chartData.reduce((m, p) => {
-    const vals = [p.obsAvg, p.obsGust, p.fctAvg, p.fctGust, p.smhiAvg, p.smhiGust];
+    const vals = [p.obsAvg, p.obsGust, p.fctAvg, p.fctGust, p.smhiAvg];
     return vals.reduce((a: number, v) => (typeof v === 'number' && v > a ? v : a), m);
   }, 0);
-  const axisMax = Math.max(20, Math.ceil(maxReading) + ARROW_HEADROOM);
+  const axisMax = Math.max(10, Math.ceil(maxReading) + ARROW_HEADROOM);
   const arrowY = axisMax - ARROW_HEADROOM / 2;
+
+  // Round ticks rather than whatever the axis maximum happens to be — a moving
+  // maximum otherwise puts an arbitrary "13" at the top. The step keeps 4 and 6
+  // on gridlines at normal scales, so the condition thresholds line up with the
+  // band edges instead of floating between them.
+  const tickStep = axisMax <= 14 ? 2 : axisMax <= 30 ? 5 : 10;
+  const yTicks: number[] = [];
+  for (let v = 0; v <= axisMax; v += tickStep) yTicks.push(v);
+
+  // Condition bands, clipped to the axis. Recharts discards a ReferenceArea
+  // that overflows the domain, so an unclipped 6–13 band would vanish entirely
+  // on a calm day — taking the "Great" reference with it.
+  const bands = [
+    { from: 0, to: 4, fill: '#9ca3af', opacity: 0.08 },
+    { from: 4, to: 6, fill: '#fbbf24', opacity: 0.1 },
+    { from: 6, to: 13, fill: '#22c55e', opacity: 0.08 },
+    { from: 13, to: axisMax, fill: '#f97316', opacity: 0.1 },
+  ]
+    .filter((b) => b.from < axisMax)
+    .map((b) => ({ ...b, to: Math.min(b.to, axisMax) }));
 
   // Space the arrows by time rather than by index: sources differ in density,
   // so every Nth point would bunch up on 10-minute data and thin out on hourly.
+  // Measured gust becomes a band from avg to gust rather than its own line.
+  // Three separate gust lines were mostly noise; as a band the gustiness reads
+  // as a thickness you take in at a glance instead of a line you have to trace.
+  for (const p of chartData) {
+    if (p.obsAvg !== undefined && p.obsGust !== undefined) {
+      p.obsBand = [p.obsAvg, p.obsGust];
+    }
+  }
+
   const arrowStepMs = RANGES[range].arrowEveryH * 3600 * 1000;
   let lastArrowAt = -Infinity;
   for (const p of chartData) {
@@ -219,50 +276,100 @@ export default function WindTimeline({
     );
   };
 
-  interface TooltipPayloadEntry {
-    name?: string;
-    value?: number;
-    color?: string;
-  }
   interface TooltipPropsLoose {
     active?: boolean;
-    payload?: TooltipPayloadEntry[];
+    payload?: unknown[];
     label?: string | number;
   }
+
+  /**
+   * Nearest point that actually carries `key`, within the snap window.
+   *
+   * Recharts hands the tooltip only the row under the cursor, and the sources
+   * are on different clocks: the station reports on its own minutes, the models
+   * on whole hours. So a row is nearly always measured-only or forecast-only,
+   * and hovering gave you one or the other — never the comparison. Reading each
+   * series from the nearest row it exists on puts them side by side, with the
+   * real timestamp shown whenever it isn't the one being hovered.
+   */
+  const nearestWith = (t: number, key: keyof ChartDataPoint) => {
+    let best: ChartDataPoint | undefined;
+    let bestDelta = Infinity;
+    for (const p of chartData) {
+      if (p[key] === undefined) continue;
+      const d = Math.abs(p.time - t);
+      if (d < bestDelta) {
+        bestDelta = d;
+        best = p;
+      }
+    }
+    return best && bestDelta <= TOOLTIP_SNAP_MS ? best : undefined;
+  };
+
+  const obsLabel = (what: string) => (historyIsModelled ? `Past ${what} (model)` : `Obs ${what}`);
+  const primaryName = forecastSource === 'smhi' ? 'SMHI' : 'OM';
+  const tooltipRows: { key: keyof ChartDataPoint; label: string; color: string }[] = [
+    { key: 'obsAvg', label: obsLabel('avg'), color: SERIES.obs },
+    { key: 'obsGust', label: obsLabel('gust'), color: SERIES.obsGust },
+    { key: 'fctAvg', label: `${primaryName} avg`, color: SERIES.om },
+    { key: 'fctGust', label: `${primaryName} gust`, color: SERIES.om },
+    ...(forecastSmhi.length > 0
+      ? ([
+          // Drawn nowhere — the second opinion's gust is worth a number but not
+          // a sixth line, so it lives here only.
+          { key: 'smhiAvg', label: 'SMHI avg', color: SERIES.smhi },
+          { key: 'smhiGust', label: 'SMHI gust', color: SERIES.smhi },
+        ] as const)
+      : []),
+  ];
+
   const customTooltip = (props: TooltipPropsLoose) => {
-    const { active, payload, label } = props;
-    if (!active || !payload || payload.length === 0) return null;
+    const { active, label } = props;
+    if (!active) return null;
     const labelNum = typeof label === 'number' ? label : Number(label);
-    const point = chartData.find((p) => p.time === labelNum);
+    if (isNaN(labelNum)) return null;
+
+    const rows = tooltipRows
+      .map((r) => {
+        const p = nearestWith(labelNum, r.key);
+        if (!p) return null;
+        return { ...r, value: p[r.key] as number, at: p.time };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
+    if (rows.length === 0) return null;
+
+    const dirPoint = nearestWith(labelNum, 'dir');
+    const hhmm = (t: number) =>
+      new Date(t).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+    // Only worth showing when it isn't the time in the header.
+    const stamp = (t: number) => (Math.abs(t - labelNum) >= 60_000 ? hhmm(t) : null);
+
     return (
       <div className="bg-slate-800 border border-slate-600 rounded-lg p-3 text-sm shadow-xl">
-        <p className="text-slate-300 mb-2 font-medium">
-          {!isNaN(labelNum) ? formatTooltipTime(labelNum) : ''}
-        </p>
-        {payload
-          .filter((entry) => entry.name !== 'dir')
-          .map((entry, i) => (
-            <div key={entry.name ?? i} className="flex items-center gap-2">
-              <span style={{ color: entry.color ?? '#94a3b8' }}>{entry.name ?? ''}:</span>
-              <span className="font-semibold text-white">{entry.value?.toFixed(1)} m/s</span>
-            </div>
-          ))}
-        {point?.dir !== undefined && (
+        <p className="text-slate-300 mb-2 font-medium">{formatTooltipTime(labelNum)}</p>
+        {rows.map((r) => (
+          <div key={r.key} className="flex items-baseline gap-2">
+            <span style={{ color: r.color }}>{r.label}:</span>
+            <span className="font-semibold text-white">{r.value.toFixed(1)} m/s</span>
+            {stamp(r.at) && <span className="text-xs text-slate-500">{stamp(r.at)}</span>}
+          </div>
+        ))}
+        {dirPoint?.dir !== undefined && (
           <div className="flex items-center gap-2 mt-1 pt-1 border-t border-slate-700">
             <span className="text-slate-400">Wind from:</span>
             <span className="font-semibold text-white">
-              {headingToCompass(point.dir)} {Math.round(point.dir)}°
+              {headingToCompass(dirPoint.dir)} {Math.round(dirPoint.dir)}°
             </span>
             {hasSectors && (
               <span
                 className="text-xs"
                 style={{
-                  color: isGoodWindDirection(point.dir, goodSectors)
+                  color: isGoodWindDirection(dirPoint.dir, goodSectors)
                     ? conditionColors.great
                     : '#94a3b8',
                 }}
               >
-                {isGoodWindDirection(point.dir, goodSectors) ? 'works here' : 'off-sector'}
+                {isGoodWindDirection(dirPoint.dir, goodSectors) ? 'works here' : 'off-sector'}
               </span>
             )}
           </div>
@@ -345,10 +452,15 @@ export default function WindTimeline({
       <ResponsiveContainer width="100%" height={300}>
         <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
           {/* Background color bands for condition levels */}
-          <ReferenceArea y1={0} y2={4} fill="#9ca3af" fillOpacity={0.08} />
-          <ReferenceArea y1={4} y2={6} fill="#fbbf24" fillOpacity={0.1} />
-          <ReferenceArea y1={6} y2={13} fill="#22c55e" fillOpacity={0.08} />
-          <ReferenceArea y1={13} y2={axisMax} fill="#f97316" fillOpacity={0.1} />
+          {bands.map((b) => (
+            <ReferenceArea
+              key={b.from}
+              y1={b.from}
+              y2={b.to}
+              fill={b.fill}
+              fillOpacity={b.opacity}
+            />
+          ))}
 
           <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
 
@@ -366,6 +478,7 @@ export default function WindTimeline({
           />
           <YAxis
             domain={[0, axisMax]}
+            ticks={yTicks}
             tick={{ fill: '#94a3b8', fontSize: 11 }}
             tickLine={{ stroke: '#334155' }}
             axisLine={{ stroke: '#334155' }}
@@ -375,8 +488,20 @@ export default function WindTimeline({
 
           <Tooltip content={customTooltip} />
 
+          {/* Spelled out rather than derived from child order, which would put
+              the gust band ahead of the measured line it belongs to, and would
+              draw the band as a line. Measured leads; forecasts follow. */}
           <Legend
             wrapperStyle={{ color: '#94a3b8', fontSize: '12px', paddingTop: '8px' }}
+            payload={[
+              { value: obsLabel('avg'), type: 'line', color: SERIES.obs, id: 'obsAvg' },
+              { value: obsLabel('gust'), type: 'rect', color: SERIES.obsGust, id: 'obsBand' },
+              { value: `${primaryName} avg`, type: 'line', color: SERIES.om, id: 'fctAvg' },
+              { value: `${primaryName} gust`, type: 'line', color: SERIES.om, id: 'fctGust' },
+              ...(forecastSmhi.length > 0
+                ? [{ value: 'SMHI avg', type: 'line' as const, color: SERIES.smhi, id: 'smhiAvg' }]
+                : []),
+            ]}
           />
 
           {/* Now reference line — make it loud so users always see where "now" is */}
@@ -409,23 +534,24 @@ export default function WindTimeline({
             isAnimationActive={false}
           />
 
-          {/* Observed avg */}
-          <Line
-            dataKey="obsAvg"
-            name={historyIsModelled ? 'Past avg (model)' : 'Obs avg'}
-            stroke="#3b82f6"
-            strokeWidth={2}
-            dot={false}
+          {/* Measured gust, as the spread above the average rather than a line.
+              Drawn first so the lines sit on top of it. */}
+          <Area
+            dataKey="obsBand"
+            name={historyIsModelled ? 'Past gust (model)' : 'Obs gust'}
+            stroke="none"
+            fill={SERIES.obsGust}
+            fillOpacity={0.16}
+            activeDot={false}
             connectNulls
             isAnimationActive={false}
           />
-          {/* Observed gust */}
+          {/* Measured avg — the ground truth, and the only line drawn as such */}
           <Line
-            dataKey="obsGust"
-            name={historyIsModelled ? 'Past gust (model)' : 'Obs gust'}
-            stroke="#93c5fd"
-            strokeWidth={1.5}
-            strokeDasharray="4 2"
+            dataKey="obsAvg"
+            name={historyIsModelled ? 'Past avg (model)' : 'Obs avg'}
+            stroke={SERIES.obs}
+            strokeWidth={2.5}
             dot={false}
             connectNulls
             isAnimationActive={false}
@@ -434,20 +560,22 @@ export default function WindTimeline({
           <Line
             dataKey="fctAvg"
             name={forecastSource === 'smhi' ? 'SMHI avg' : 'OM avg'}
-            stroke="#6366f1"
+            stroke={SERIES.om}
             strokeWidth={2}
             strokeDasharray="6 3"
             dot={false}
             connectNulls
             isAnimationActive={false}
           />
-          {/* Forecast gust (primary) */}
+          {/* Forecast gust — the only gust line left, kept faint. The second
+              opinion's gust is in the tooltip instead of on the plot. */}
           <Line
             dataKey="fctGust"
             name={forecastSource === 'smhi' ? 'SMHI gust' : 'OM gust'}
-            stroke="#a5b4fc"
-            strokeWidth={1.5}
-            strokeDasharray="2 2"
+            stroke={SERIES.om}
+            strokeWidth={1.25}
+            strokeDasharray="2 3"
+            strokeOpacity={0.5}
             dot={false}
             connectNulls
             isAnimationActive={false}
@@ -457,21 +585,9 @@ export default function WindTimeline({
             <Line
               dataKey="smhiAvg"
               name="SMHI avg"
-              stroke="#2dd4bf"
+              stroke={SERIES.smhi}
               strokeWidth={2}
               strokeDasharray="6 3"
-              dot={false}
-              connectNulls
-              isAnimationActive={false}
-            />
-          )}
-          {forecastSmhi.length > 0 && (
-            <Line
-              dataKey="smhiGust"
-              name="SMHI gust"
-              stroke="#99f6e4"
-              strokeWidth={1}
-              strokeDasharray="2 3"
               dot={false}
               connectNulls
               isAnimationActive={false}
