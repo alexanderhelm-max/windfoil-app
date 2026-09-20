@@ -8,10 +8,19 @@ import { Session, summariseConditions } from '@/lib/sessions';
 import { headingToCompass } from '@/lib/wind-utils';
 
 const DURATIONS = [1, 2, 3, 4] as const;
-/** Hours-ago options spanning the full day the history covers. */
-const ENDED_AGO = [0, 1, 2, 3, 4, 6, 8, 12, 16, 20] as const;
 /** Observation history reaches 24 h back; a window starting earlier has nothing. */
 const HISTORY_HOURS = 24;
+/** Half-hour steps: you rarely know the minute, but "an hour and a half ago" is
+ *  a real answer, and at a 1–2 h session it changes which readings get included. */
+const AGO_STEP_H = 0.5;
+
+function formatAgo(h: number): string {
+  if (h === 0) return 'just now';
+  const whole = Math.floor(h);
+  const mins = Math.round((h - whole) * 60);
+  if (whole === 0) return `${mins} min ago`;
+  return mins === 0 ? `${whole}h ago` : `${whole}h ${mins}m ago`;
+}
 
 /**
  * Log a session just ridden.
@@ -19,9 +28,9 @@ const HISTORY_HOURS = 24;
  * The conditions it will store are shown before saving, because they're a
  * snapshot that can't be recomputed later — if the window is wrong, it has to
  * be fixed now. Observation history only reaches 24 hours back, so the form
- * offers "ended N hours ago" across the last day rather than a free date
- * picker, and greys out the combinations whose window would start before the
- * history reaches — anything older has no conditions left to attach.
+ * asks how long ago you finished rather than offering a free date picker, and
+ * the slider simply stops where the history does — a window that can't be
+ * filled is unreachable rather than offered and then refused.
  */
 export default function LogSessionDialog({
   spot,
@@ -43,16 +52,14 @@ export default function LogSessionDialog({
   const [hours, setHours] = useState<number>(2);
   const [endedAgo, setEndedAgo] = useState<number>(0);
 
-  // A window is reachable only if its start is still inside the history.
-  const outOfRange = (dur: number, ago: number) => dur + ago > HISTORY_HOURS;
+  // The far end of the slider is wherever this session length runs out of
+  // history, so it moves as the duration changes.
+  const maxAgo = HISTORY_HOURS - hours;
   // Lengthening a session can push an already-old window off the back of the
   // history, so pull it forward rather than leaving an unsavable selection.
   function chooseDuration(h: number) {
     setHours(h);
-    if (outOfRange(h, endedAgo)) {
-      const fits = [...ENDED_AGO].reverse().find((a) => !outOfRange(h, a));
-      setEndedAgo(fits ?? 0);
-    }
+    setEndedAgo((a) => Math.min(a, HISTORY_HOURS - h));
   }
   const [rating, setRating] = useState<1 | 2 | 3 | 4 | 5>(4);
   const [note, setNote] = useState('');
@@ -145,37 +152,44 @@ export default function LogSessionDialog({
           </div>
 
           <div>
-            <label className="block text-xs text-slate-400 mb-1.5">Finished</label>
-            <div className="flex gap-1.5 flex-wrap">
-              {ENDED_AGO.map((a) => {
-                const disabled = outOfRange(hours, a);
-                return (
-                  <button
-                    key={a}
-                    type="button"
-                    disabled={disabled}
-                    onClick={() => setEndedAgo(a)}
-                    title={
-                      disabled
-                        ? `A ${hours}h session ending ${a}h ago starts before the history reaches`
-                        : undefined
-                    }
-                    className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${
-                      endedAgo === a
-                        ? 'bg-blue-600 text-white'
-                        : disabled
-                          ? 'bg-slate-900/50 text-slate-600 cursor-not-allowed'
-                          : 'bg-slate-900 text-slate-300 hover:bg-slate-700'
-                    }`}
-                  >
-                    {a === 0 ? 'just now' : `${a}h ago`}
-                  </button>
-                );
-              })}
+            <div className="flex items-baseline justify-between mb-1.5">
+              <label htmlFor="ended-ago" className="text-xs text-slate-400">
+                Finished
+              </label>
+              <span className="text-sm font-medium text-white tabular-nums">
+                {formatAgo(endedAgo)}
+              </span>
             </div>
-            <p className="text-xs text-slate-500 mt-1.5">
-              {fmt(start)} – {fmt(end)} · anything older than {HISTORY_HOURS}h has no
-              conditions left to attach
+            <input
+              id="ended-ago"
+              type="range"
+              min={0}
+              max={maxAgo}
+              step={AGO_STEP_H}
+              value={endedAgo}
+              onChange={(e) => setEndedAgo(Number(e.target.value))}
+              aria-valuetext={formatAgo(endedAgo)}
+              // The fill is painted as a gradient rather than left to
+              // accent-color, which only tints the default light track — far
+              // too bright against the rest of this dialog.
+              style={{
+                background: `linear-gradient(to right, #3b82f6 ${(endedAgo / maxAgo) * 100}%, #0f172a ${(endedAgo / maxAgo) * 100}%)`,
+              }}
+              className="w-full h-1.5 appearance-none rounded-full border border-slate-700 cursor-pointer
+                focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400
+                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4
+                [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full
+                [&::-webkit-slider-thumb]:bg-blue-500 [&::-webkit-slider-thumb]:cursor-pointer
+                [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:border-0
+                [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-blue-500"
+            />
+            <div className="flex justify-between text-xs text-slate-500 mt-1">
+              <span>now</span>
+              <span>{maxAgo}h ago</span>
+            </div>
+            <p className="text-xs text-slate-500 mt-1.5 tabular-nums">
+              {fmt(start)} – {fmt(end)} · history reaches {HISTORY_HOURS}h back, so a{' '}
+              {hours}h session stops at {maxAgo}h ago
             </p>
           </div>
 
